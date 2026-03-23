@@ -64,12 +64,11 @@ pub fn development_config(enable_manual_seal: bool) -> ChainSpec {
 			AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
 			// Pre-funded accounts
 			vec![
-				AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), // Alith
-				AccountId::from(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")), // Baltathar
-				AccountId::from(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")), // Charleth
-				AccountId::from(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")), // Dorothy
-				AccountId::from(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")), // Ethan
-				AccountId::from(hex!("C0F0f4ab324C46e55D02D0033343B4Be8A55532d")), // Faith
+				(AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), 300_000_000u128 * 1_000_000_000_000u128), // Treasury 30%
+				(AccountId::from(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")), 250_000_000u128 * 1_000_000_000_000u128), // Mining Pool 25%
+				(AccountId::from(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")), 200_000_000u128 * 1_000_000_000_000u128), // Investors 20%
+				(AccountId::from(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")), 150_000_000u128 * 1_000_000_000_000u128), // Team 15%
+				(AccountId::from(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")), 100_000_000u128 * 1_000_000_000_000u128), // Staking 10%
 			],
 			// Initial PoA authorities
 			vec![authority_keys_from_seed("Alice")],
@@ -91,12 +90,11 @@ pub fn local_testnet_config() -> ChainSpec {
 			AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
 			// Pre-funded accounts
 			vec![
-				AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), // Alith
-				AccountId::from(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")), // Baltathar
-				AccountId::from(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")), // Charleth
-				AccountId::from(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")), // Dorothy
-				AccountId::from(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")), // Ethan
-				AccountId::from(hex!("C0F0f4ab324C46e55D02D0033343B4Be8A55532d")), // Faith
+				(AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), 300_000_000u128 * 1_000_000_000_000u128), // Treasury 30%
+				(AccountId::from(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")), 250_000_000u128 * 1_000_000_000_000u128), // Mining Pool 25%
+				(AccountId::from(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")), 200_000_000u128 * 1_000_000_000_000u128), // Investors 20%
+				(AccountId::from(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")), 150_000_000u128 * 1_000_000_000_000u128), // Team 15%
+				(AccountId::from(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")), 100_000_000u128 * 1_000_000_000_000u128), // Staking 10%
 			],
 			vec![
 				authority_keys_from_seed("Alice"),
@@ -111,7 +109,7 @@ pub fn local_testnet_config() -> ChainSpec {
 /// Configure initial storage state for FRAME modules.
 fn testnet_genesis(
 	sudo_key: AccountId,
-	endowed_accounts: Vec<AccountId>,
+	endowed_accounts: Vec<(AccountId, u128)>,
 	initial_authorities: Vec<(AuraId, GrandpaId)>,
 	chain_id: u64,
 	enable_manual_seal: bool,
@@ -166,7 +164,6 @@ fn testnet_genesis(
 			"balances": endowed_accounts
 				.iter()
 				.cloned()
-				.map(|k| (k, 1_000_000 * UNITS))
 				.collect::<Vec<_>>()
 		},
 		"aura": { "authorities": initial_authorities.iter().map(|x| (x.0.clone())).collect::<Vec<_>>() },

@@ -1,0 +1,42 @@
+⚡ Found 4 strongly connected components which includes at least one cycle each
+cycle(001) ∈ α: DisputeCoordinator ~~{"DisputeDistributionMessage"}~~> DisputeDistribution ~~{"DisputeCoordinatorMessage"}~~>  *
+cycle(002) ∈ β: ApprovalVoting ~~{"ApprovalDistributionMessage"}~~> ApprovalDistribution ~~{"ApprovalVotingMessage"}~~>  *
+cycle(003) ∈ γ: CandidateBacking ~~{"CollatorProtocolMessage"}~~> CollatorProtocol ~~{"CandidateBackingMessage"}~~>  *
+cycle(004) ∈ δ: NetworkBridgeRx ~~{"GossipSupportMessage"}~~> GossipSupport ~~{"NetworkBridgeRxMessage"}~~>  *
+   Compiling frame-storage-access-test-runtime v0.6.0 (https://github.com/paritytech/polkadot-sdk?branch=stable2512#b1839403)
+   Compiling arxon-runtime v0.0.0 (/home/gabe/frontier-template/template/runtime)
+warning: use of deprecated constant `pallet::RuntimeEvent::_w`: 
+                 It is deprecated to have `RuntimeEvent` associated type in the pallet config.
+                 Please instead remove it as it is redundant since associated bound gets appended automatically: 
+                 
+                 pub trait Config: frame_system::Config<RuntimeEvent: From<Event<Self>>> { }.
+         
+                 For more info see:
+                     <https://github.com/paritytech/polkadot-sdk/pull/7229>
+  --> template/pallets/mining/src/lib.rs:11:14
+   |
+11 |         type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
+   |              ^^^^^^^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+warning: `pallet-mining` (lib) generated 1 warning
+warning: use of deprecated constant `pallet::RuntimeEvent::_w`: 
+                 It is deprecated to have `RuntimeEvent` associated type in the pallet config.
+                 Please instead remove it as it is redundant since associated bound gets appended automatically: 
+                 
+                 pub trait Config: frame_system::Config<RuntimeEvent: From<Event<Self>>> { }.
+         
+                 For more info see:
+                     <https://github.com/paritytech/polkadot-sdk/pull/7229>
+  --> template/pallets/privacy/src/lib.rs:23:14
+   |
+23 |         type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
+   |              ^^^^^^^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+warning: `pallet-privacy` (lib) generated 1 warning
+   Compiling frame-benchmarking-cli v53.0.0 (https://github.com/paritytech/polkadot-sdk?branch=stable2512#b1839403)
+   Compiling arxon-node v0.0.0 (/home/gabe/frontier-template/template/node)
+    Finished `release` profile [optimized] target(s) in 44m 06s

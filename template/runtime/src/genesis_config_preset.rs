@@ -12,18 +12,29 @@ use sp_genesis_builder::PresetId;
 use sp_std::prelude::*;
 
 /// Generate a chain spec for use with the development service.
+// ARX Token: 1,000,000,000 total supply, 12 decimals
+// 1 ARX = 1_000_000_000_000 units
+const ARX: u128 = 1_000_000_000_000;
+
 pub fn development() -> serde_json::Value {
 	testnet_genesis(
-		// Sudo account (Alith)
+		// Sudo account (Treasury)
 		AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
-		// Pre-funded accounts
+		// Genesis accounts with real ARX allocations
 		vec![
-			AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), // Alith
-			AccountId::from(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")), // Baltathar
-			AccountId::from(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")), // Charleth
+			// Treasury: 30% = 300M ARX
+			(AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), 300_000_000 * ARX),
+			// Mining Pool: 25% = 250M ARX
+			(AccountId::from(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")), 250_000_000 * ARX),
+			// Investors: 20% = 200M ARX
+			(AccountId::from(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")), 200_000_000 * ARX),
+			// Team: 15% = 150M ARX
+			(AccountId::from(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")), 150_000_000 * ARX),
+			// Staking: 10% = 100M ARX
+			(AccountId::from(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")), 100_000_000 * ARX),
 		],
 		vec![],
-		42,    // chain id
+		7171,  // Arxon chain ID
 		false, // disable manual seal
 	)
 }
@@ -31,7 +42,7 @@ pub fn development() -> serde_json::Value {
 /// Configure initial storage state for FRAME modules.
 fn testnet_genesis(
 	sudo_key: AccountId,
-	endowed_accounts: Vec<AccountId>,
+	endowed_accounts: Vec<(AccountId, u128)>,
 	_initial_authorities: Vec<(AuraId, GrandpaId)>,
 	chain_id: u64,
 	enable_manual_seal: bool,
@@ -84,7 +95,6 @@ fn testnet_genesis(
 			balances: endowed_accounts
 				.iter()
 				.cloned()
-				.map(|k| (k, 1 << 110))
 				.collect(),
 			..Default::default()
 		},

@@ -13,7 +13,7 @@
 // benchmark
 // pallet
 // --runtime
-// ./target/release/wbuild/frontier-template-runtime/frontier_template_runtime.compact.compressed.wasm
+// ./target/release/wbuild/arxon-runtime/arxon_runtime.compact.compressed.wasm
 // --output
 // ./template/runtime/src/weights/
 // --pallet

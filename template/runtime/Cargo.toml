@@ -1,5 +1,5 @@
 [package]
-name = "frontier-template-runtime"
+name = "arxon-runtime"
 version = "0.0.0"
 license = "Unlicense"
 description = "A fresh FRAME-based Substrate runtime, ready for hacking."
@@ -58,6 +58,8 @@ fp-self-contained = { workspace = true, features = ["serde"] }
 pallet-base-fee = { workspace = true }
 pallet-dynamic-fee = { workspace = true }
 pallet-ethereum = { workspace = true }
+pallet-mining = { workspace = true }
+pallet-privacy = { workspace = true }
 pallet-evm = { workspace = true }
 pallet-evm-chain-id = { workspace = true }
 pallet-evm-precompile-curve25519 = { workspace = true }

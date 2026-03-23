@@ -10,7 +10,7 @@ use sp_core::ecdsa;
 use sp_core::{Pair, Public, H160, U256};
 use sp_runtime::traits::{IdentifyAccount, Verify};
 // Frontier
-use frontier_template_runtime::{AccountId, Balance, SS58Prefix, Signature, WASM_BINARY};
+use arxon_runtime::{AccountId, Balance, SS58Prefix, Signature, WASM_BINARY};
 
 // The URL for the telemetry server.
 // const STAGING_TELEMETRY_URL: &str = "wss://telemetry.polkadot.io/submit/";
@@ -55,8 +55,8 @@ const UNITS: Balance = 1_000_000_000_000_000_000;
 
 pub fn development_config(enable_manual_seal: bool) -> ChainSpec {
 	ChainSpec::builder(WASM_BINARY.expect("WASM not available"), Default::default())
-		.with_name("Development")
-		.with_id("dev")
+		.with_name("Arxon Dev")
+		.with_id("arxon_dev")
 		.with_chain_type(ChainType::Development)
 		.with_properties(properties())
 		.with_genesis_config_patch(testnet_genesis(
@@ -74,7 +74,7 @@ pub fn development_config(enable_manual_seal: bool) -> ChainSpec {
 			// Initial PoA authorities
 			vec![authority_keys_from_seed("Alice")],
 			// Ethereum chain ID
-			SS58Prefix::get() as u64,
+			7171u64,
 			enable_manual_seal,
 		))
 		.build()
@@ -82,8 +82,8 @@ pub fn development_config(enable_manual_seal: bool) -> ChainSpec {
 
 pub fn local_testnet_config() -> ChainSpec {
 	ChainSpec::builder(WASM_BINARY.expect("WASM not available"), Default::default())
-		.with_name("Local Testnet")
-		.with_id("local_testnet")
+		.with_name("Arxon Local")
+		.with_id("arxon_local")
 		.with_chain_type(ChainType::Local)
 		.with_properties(properties())
 		.with_genesis_config_patch(testnet_genesis(

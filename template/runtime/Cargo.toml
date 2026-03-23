@@ -2,7 +2,7 @@
 name = "arxon-runtime"
 version = "0.0.0"
 license = "Unlicense"
-description = "A fresh FRAME-based Substrate runtime, ready for hacking."
+description = "Arxon runtime: PoS consensus, EVM, selective privacy, and ARX token."
 publish = false
 authors = { workspace = true }
 edition = { workspace = true }

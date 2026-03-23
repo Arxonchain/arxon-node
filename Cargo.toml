@@ -50,9 +50,9 @@ members = [
 resolver = "2"
 
 [workspace.package]
-authors = ["Frontier developers <legal@bitarray.dev>"]
+authors = ["Arxon Team <dev@arxon.io>"]
 edition = "2021"
-repository = "https://github.com/polkadot-evm/frontier/"
+repository = "https://github.com/Arxonchain/arxon-node"
 
 [workspace.dependencies]
 async-trait = "0.1"

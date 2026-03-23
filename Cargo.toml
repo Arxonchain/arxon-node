@@ -40,6 +40,8 @@ members = [
 	"primitives/self-contained",
 	"template/node",
 	"template/runtime",
+	"template/pallets/mining",
+	"template/pallets/privacy",
 	"precompiles",
 	"precompiles/macro",
 	"precompiles/tests-external",
@@ -226,7 +228,9 @@ pallet-hotfix-sufficients = { path = "frame/hotfix-sufficients", default-feature
 # Frontier Utility
 precompile-utils = { path = "precompiles", default-features = false }
 # Frontier Template
-frontier-template-runtime = { path = "template/runtime", default-features = false }
+arxon-runtime = { path = "template/runtime", default-features = false }
+pallet-mining = { path = "template/pallets/mining", default-features = false }
+pallet-privacy = { path = "template/pallets/privacy", default-features = false }
 
 [profile.release]
 # Substrate runtime requires unwinding.

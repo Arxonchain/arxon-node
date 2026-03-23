@@ -552,6 +552,131 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
+name = "arxon-node"
+version = "0.0.0"
+dependencies = [
+ "arxon-runtime",
+ "async-trait",
+ "clap",
+ "cumulus-primitives-proof-size-hostfunction",
+ "fc-api",
+ "fc-cli",
+ "fc-consensus",
+ "fc-db",
+ "fc-mapping-sync",
+ "fc-rpc",
+ "fc-rpc-core",
+ "fc-storage",
+ "fp-account",
+ "fp-dynamic-fee",
+ "fp-evm",
+ "fp-rpc",
+ "frame-benchmarking",
+ "frame-benchmarking-cli",
+ "frame-system",
+ "frame-system-rpc-runtime-api",
+ "futures",
+ "hex-literal",
+ "jsonrpsee",
+ "log",
+ "pallet-transaction-payment",
+ "pallet-transaction-payment-rpc",
+ "pallet-transaction-payment-rpc-runtime-api",
+ "parity-scale-codec",
+ "sc-basic-authorship",
+ "sc-chain-spec",
+ "sc-cli",
+ "sc-client-api",
+ "sc-consensus",
+ "sc-consensus-aura",
+ "sc-consensus-grandpa",
+ "sc-consensus-manual-seal",
+ "sc-executor",
+ "sc-network",
+ "sc-network-sync",
+ "sc-offchain",
+ "sc-rpc",
+ "sc-service",
+ "sc-telemetry",
+ "sc-transaction-pool",
+ "sc-transaction-pool-api",
+ "serde_json",
+ "sp-api",
+ "sp-block-builder",
+ "sp-blockchain",
+ "sp-consensus-aura",
+ "sp-consensus-grandpa",
+ "sp-core",
+ "sp-inherents",
+ "sp-io",
+ "sp-offchain",
+ "sp-runtime",
+ "sp-session",
+ "sp-timestamp",
+ "sp-transaction-pool",
+ "substrate-build-script-utils",
+ "substrate-frame-rpc-system",
+ "substrate-prometheus-endpoint",
+]
+
+[[package]]
+name = "arxon-runtime"
+version = "0.0.0"
+dependencies = [
+ "cumulus-pallet-weight-reclaim",
+ "ethereum",
+ "fp-account",
+ "fp-evm",
+ "fp-rpc",
+ "fp-self-contained",
+ "frame-benchmarking",
+ "frame-executive",
+ "frame-support",
+ "frame-system",
+ "frame-system-benchmarking",
+ "frame-system-rpc-runtime-api",
+ "hex-literal",
+ "pallet-aura",
+ "pallet-balances",
+ "pallet-base-fee",
+ "pallet-dynamic-fee",
+ "pallet-ethereum",
+ "pallet-evm",
+ "pallet-evm-chain-id",
+ "pallet-evm-precompile-curve25519",
+ "pallet-evm-precompile-curve25519-benchmarking",
+ "pallet-evm-precompile-modexp",
+ "pallet-evm-precompile-sha3fips",
+ "pallet-evm-precompile-sha3fips-benchmarking",
+ "pallet-evm-precompile-simple",
+ "pallet-grandpa",
+ "pallet-mining",
+ "pallet-privacy",
+ "pallet-sudo",
+ "pallet-timestamp",
+ "pallet-transaction-payment",
+ "pallet-transaction-payment-rpc-runtime-api",
+ "parity-scale-codec",
+ "polkadot-runtime-common",
+ "scale-info",
+ "serde_json",
+ "sp-api",
+ "sp-block-builder",
+ "sp-consensus-aura",
+ "sp-consensus-grandpa",
+ "sp-core",
+ "sp-genesis-builder",
+ "sp-inherents",
+ "sp-offchain",
+ "sp-runtime",
+ "sp-session",
+ "sp-std",
+ "sp-transaction-pool",
+ "sp-version",
+ "substrate-wasm-builder",
+]
+
+[[package]]
 name = "asn1-rs"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3050,13 +3175,13 @@ dependencies = [
 name = "fc-cli"
 version = "1.0.0-dev"
 dependencies = [
+ "arxon-runtime",
  "clap",
  "ethereum-types",
  "fc-api",
  "fc-db",
  "fp-rpc",
  "fp-storage",
- "frontier-template-runtime",
  "futures",
  "parity-scale-codec",
  "sc-block-builder",
@@ -3126,6 +3251,7 @@ dependencies = [
 name = "fc-mapping-sync"
 version = "2.0.0-dev"
 dependencies = [
+ "arxon-runtime",
  "ethereum",
  "ethereum-types",
  "fc-db",
@@ -3133,7 +3259,6 @@ dependencies = [
  "fp-consensus",
  "fp-rpc",
  "fp-storage",
- "frontier-template-runtime",
  "futures",
  "futures-timer",
  "log",
@@ -3851,129 +3976,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "frontier-template-node"
-version = "0.0.0"
-dependencies = [
- "async-trait",
- "clap",
- "cumulus-primitives-proof-size-hostfunction",
- "fc-api",
- "fc-cli",
- "fc-consensus",
- "fc-db",
- "fc-mapping-sync",
- "fc-rpc",
- "fc-rpc-core",
- "fc-storage",
- "fp-account",
- "fp-dynamic-fee",
- "fp-evm",
- "fp-rpc",
- "frame-benchmarking",
- "frame-benchmarking-cli",
- "frame-system",
- "frame-system-rpc-runtime-api",
- "frontier-template-runtime",
- "futures",
- "hex-literal",
- "jsonrpsee",
- "log",
- "pallet-transaction-payment",
- "pallet-transaction-payment-rpc",
- "pallet-transaction-payment-rpc-runtime-api",
- "parity-scale-codec",
- "sc-basic-authorship",
- "sc-chain-spec",
- "sc-cli",
- "sc-client-api",
- "sc-consensus",
- "sc-consensus-aura",
- "sc-consensus-grandpa",
- "sc-consensus-manual-seal",
- "sc-executor",
- "sc-network",
- "sc-network-sync",
- "sc-offchain",
- "sc-rpc",
- "sc-service",
- "sc-telemetry",
- "sc-transaction-pool",
- "sc-transaction-pool-api",
- "serde_json",
- "sp-api",
- "sp-block-builder",
- "sp-blockchain",
- "sp-consensus-aura",
- "sp-consensus-grandpa",
- "sp-core",
- "sp-inherents",
- "sp-io",
- "sp-offchain",
- "sp-runtime",
- "sp-session",
- "sp-timestamp",
- "sp-transaction-pool",
- "substrate-build-script-utils",
- "substrate-frame-rpc-system",
- "substrate-prometheus-endpoint",
-]
-
-[[package]]
-name = "frontier-template-runtime"
-version = "0.0.0"
-dependencies = [
- "cumulus-pallet-weight-reclaim",
- "ethereum",
- "fp-account",
- "fp-evm",
- "fp-rpc",
- "fp-self-contained",
- "frame-benchmarking",
- "frame-executive",
- "frame-support",
- "frame-system",
- "frame-system-benchmarking",
- "frame-system-rpc-runtime-api",
- "hex-literal",
- "pallet-aura",
- "pallet-balances",
- "pallet-base-fee",
- "pallet-dynamic-fee",
- "pallet-ethereum",
- "pallet-evm",
- "pallet-evm-chain-id",
- "pallet-evm-precompile-curve25519",
- "pallet-evm-precompile-curve25519-benchmarking",
- "pallet-evm-precompile-modexp",
- "pallet-evm-precompile-sha3fips",
- "pallet-evm-precompile-sha3fips-benchmarking",
- "pallet-evm-precompile-simple",
- "pallet-grandpa",
- "pallet-sudo",
- "pallet-timestamp",
- "pallet-transaction-payment",
- "pallet-transaction-payment-rpc-runtime-api",
- "parity-scale-codec",
- "polkadot-runtime-common",
- "scale-info",
- "serde_json",
- "sp-api",
- "sp-block-builder",
- "sp-consensus-aura",
- "sp-consensus-grandpa",
- "sp-core",
- "sp-genesis-builder",
- "sp-inherents",
- "sp-offchain",
- "sp-runtime",
- "sp-session",
- "sp-std",
- "sp-transaction-pool",
- "sp-version",
- "substrate-wasm-builder",
-]
-
-[[package]]
 name = "fs-err"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4144,9 +4146,9 @@ name = "fuzz"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
+ "arxon-runtime",
  "evm",
  "frame-system",
- "frontier-template-runtime",
  "hex",
  "pallet-balances",
  "pallet-evm",
@@ -7580,6 +7582,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-mining"
+version = "0.1.0"
+dependencies = [
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "parity-scale-codec",
+ "scale-info",
+]
+
+[[package]]
 name = "pallet-mmr"
 version = "45.0.0"
 source = "git+https://github.com/paritytech/polkadot-sdk?branch=stable2512#b18394033298961134ad2ec89db59445ec5ab45f"
@@ -7589,6 +7602,17 @@ dependencies = [
  "polkadot-sdk-frame",
  "scale-info",
  "sp-mmr-primitives",
+]
+
+[[package]]
+name = "pallet-privacy"
+version = "0.1.0"
+dependencies = [
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "parity-scale-codec",
+ "scale-info",
 ]
 
 [[package]]

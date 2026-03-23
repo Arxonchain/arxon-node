@@ -180,8 +180,8 @@ pub mod opaque {
 
 #[sp_version::runtime_version]
 pub const VERSION: RuntimeVersion = RuntimeVersion {
-	spec_name: Cow::Borrowed("frontier-template"),
-	impl_name: Cow::Borrowed("frontier-template"),
+	spec_name: Cow::Borrowed("arxon"),
+	impl_name: Cow::Borrowed("arxon"),
 	authoring_version: 1,
 	spec_version: 1,
 	impl_version: 1,
@@ -507,6 +507,12 @@ mod runtime {
 
 	#[runtime::pallet_index(11)]
 	pub type ManualSeal = pallet_manual_seal;
+
+	#[runtime::pallet_index(12)]
+	pub type Mining = pallet_mining;
+
+	#[runtime::pallet_index(13)]
+	pub type Privacy = pallet_privacy;
 }
 
 #[derive(Clone)]
@@ -1091,4 +1097,12 @@ mod tests {
 			.base_extrinsic;
 		assert!(base_extrinsic.ref_time() <= min_ethereum_transaction_weight.ref_time());
 	}
+}
+
+impl pallet_mining::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+}
+
+impl pallet_privacy::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
 }

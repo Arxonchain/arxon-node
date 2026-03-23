@@ -289,7 +289,7 @@ mod tests {
 		let backend = builder.backend();
 		// Client
 		let (client, _) =
-			builder.build_with_native_executor::<frontier_template_runtime::RuntimeApi, _>(None);
+			builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		// Overrides
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
@@ -436,7 +436,7 @@ mod tests {
 		let backend = builder.backend();
 		// Client
 		let (client, _) =
-			builder.build_with_native_executor::<frontier_template_runtime::RuntimeApi, _>(None);
+			builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		// Overrides
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));

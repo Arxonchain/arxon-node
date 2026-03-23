@@ -3,7 +3,7 @@ name = "arxon-node"
 version = "0.0.0"
 license = "Unlicense"
 build = "build.rs"
-description = "A fresh FRAME-based Substrate node, ready for hacking."
+description = "Arxon: A sovereign Layer-1 blockchain with selective privacy and EVM compatibility."
 publish = false
 authors = { workspace = true }
 edition = { workspace = true }

@@ -1,10 +1,10 @@
 # Arxon Node
 
-Arxon is a sovereign Layer-1 blockchain built for the unbanked and diaspora communities, starting from Nigeria. It combines selective transaction privacy, full EVM compatibility, and a mobile-first mining system — all on a single chain.
+Arxon is a sovereign Layer-1 blockchain built for the unbanked and diaspora communities, starting from Nigeria. It combines selective transaction privacy, full EVM compatibility, and a mobile-first mining system,all on a single chain.
 
 ## What Makes Arxon Different
 
-Most blockchains force a choice between full transparency and full privacy. Arxon gives users complete control — per transaction, you choose exactly what to hide:
+Most blockchains force a choice between full transparency and full privacy. Arxon gives users complete control per transaction, you choose exactly what to hide:
 
 - Hide sender
 - Hide receiver  

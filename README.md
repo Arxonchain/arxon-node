@@ -117,7 +117,7 @@ Selective privacy per transaction. Users control exactly what information is vis
 ## Community
 
 - Website: [arxon.io](https://arxon.io)
-- Twitter: [@Arxonchain](https://twitter.com/Arxonchain)
+- Twitter: [@Arxonarx](https://twitter.com/Arxonarx)
 - Mining App: Join 1M+ miners earning ARX-P points
 
 ## License

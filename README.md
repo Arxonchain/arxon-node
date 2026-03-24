@@ -1,20 +1,127 @@
-# Polkadot Frontier
+# Arxon Node
 
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/polkadot-evm/frontier/test.yml)](https://github.com/polkadot-evm/frontier/actions)
-[![Matrix](https://img.shields.io/matrix/frontier:matrix.org)](https://matrix.to/#/#frontier:matrix.org)
+Arxon is a sovereign Layer-1 blockchain built for the unbanked and diaspora communities, starting from Nigeria. It combines selective transaction privacy, full EVM compatibility, and a mobile-first mining system — all on a single chain.
 
-Frontier is the EVM backbone of Polkadot.
+## What Makes Arxon Different
 
-* [Docs](https://polkadot-evm.github.io/frontier)
-* [API docs](https://polkadot-evm.github.io/frontier/rustdocs/pallet_evm/)
+Most blockchains force a choice between full transparency and full privacy. Arxon gives users complete control — per transaction, you choose exactly what to hide:
 
-## Features
+- Hide sender
+- Hide receiver  
+- Hide amount
+- Hide wallet balance
 
-Frontier provides a compatibility layer of EVM, so that you can run any Ethereum dapps on Polkadot, unmodified.
-Using Frontier, you get access to all the Ethereum RPC APIs you are already familiar with, and therefore you can continue to develop your dapps in your favourite Ethereum developer tools.
-As a bonus, you can even run many Ethereum L2s inside Frontier!
-For those looking to become acquainted with Frontier, consult the documentation provided [here](./docs).
-Additionally, a [template node](./template/README.md) is available to facilitate a more comprehensive technical exploration.
+This selective disclosure model is unique. It protects remittance users from exposure while keeping the chain auditable for exchanges and regulators.
 
-Frontier is also a migration framework.
-Besides the common strategy of direct state export/import and transaction-level replays, Frontier's Pre-Log Wrapper Block feature provides a possible method for a zero-downtime live migration.
+## Key Features
+
+- **Sovereign L1** — Not a fork, not a sidechain. Arxon is its own independent blockchain with its own consensus (BABE/GRANDPA)
+- **ARX Token** — Native token with 1,000,000,000 total supply and 12 decimal places
+- **EVM Compatible** — Deploy Solidity smart contracts. Connect MetaMask. Use any Ethereum tooling
+- **Selective Privacy** — Per-transaction privacy flags for sender, receiver, amount, and balance
+- **Mining System** — Browser and mobile mining via ARX-P points, convertible to ARX at mainnet
+- **Chain ID** — 7171
+
+## Token Distribution
+
+| Allocation | Amount | Percentage |
+|---|---|---|
+| Treasury | 300,000,000 ARX | 30% |
+| Community Mining | 250,000,000 ARX | 25% |
+| Investors | 200,000,000 ARX | 20% |
+| Team (4yr vest) | 150,000,000 ARX | 15% |
+| Staking Reserve | 100,000,000 ARX | 10% |
+
+## Network Details
+
+| Parameter | Value |
+|---|---|
+| Chain ID (EVM) | 7171 |
+| Token Symbol | ARX |
+| Decimals | 12 |
+| Block Time | ~6 seconds |
+| Consensus | BABE/GRANDPA (PoS) |
+| SDK | Polkadot SDK stable2512 |
+
+## Connect MetaMask
+
+1. Open MetaMask → Add Network → Add manually
+2. Network Name: `Arxon Dev`
+3. RPC URL: `http://YOUR_NODE_IP:9944`
+4. Chain ID: `7171`
+5. Currency Symbol: `ARX`
+
+## Run a Node
+
+### Prerequisites
+
+- Ubuntu 22.04 or later
+- Rust (nightly toolchain)
+- 4GB RAM minimum
+- libclang, protobuf-compiler
+
+### Install Dependencies
+```bash
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
+rustup install nightly
+rustup target add wasm32-unknown-unknown --toolchain nightly
+
+# Install system dependencies
+sudo apt-get install -y libclang-dev clang protobuf-compiler
+```
+
+### Build
+```bash
+git clone https://github.com/Arxonchain/arxon-node.git
+cd arxon-node
+cargo build --release -p arxon-node
+```
+
+### Run Development Node
+```bash
+./target/release/arxon-node --dev
+```
+
+### Run with External RPC (for MetaMask/dApps)
+```bash
+./target/release/arxon-node --dev --rpc-external --unsafe-rpc-external
+```
+
+## Custom Pallets
+
+### pallet-mining
+Tracks ARX-P mining points per account. Foundation for the ARX claim system at mainnet.
+- `register_miner()` — Register as a miner
+- `credit_points()` — Sudo: credit points to an account
+
+### pallet-privacy
+Selective privacy per transaction. Users control exactly what information is visible on-chain.
+- `set_privacy_default()` — Set default privacy preferences
+- `record_tx_privacy()` — Record privacy mask for a specific transaction
+- `set_balance_visibility()` — Toggle wallet balance visibility
+
+## Roadmap
+
+- [x] Sovereign L1 chain with ARX token
+- [x] Mining pallet (ARX-P points system)
+- [x] Selective privacy pallet
+- [x] EVM compatibility (Frontier)
+- [x] Real 1B ARX genesis supply
+- [ ] Multi-node public testnet
+- [ ] ARX claim pallet for miners
+- [ ] Halo2 ZK proof integration
+- [ ] Mainnet launch (early 2027)
+
+## Community
+
+- Website: [arxon.io](https://arxon.io)
+- Twitter: [@Arxonchain](https://twitter.com/Arxonchain)
+- Mining App: Join 1M+ miners earning ARX-P points
+
+## License
+
+Licensed under the Apache License, Version 2.0 and MIT license.
+
+Built with [Polkadot SDK](https://github.com/paritytech/polkadot-sdk) and [Frontier](https://github.com/polkadot-evm/frontier).

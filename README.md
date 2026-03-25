@@ -42,6 +42,9 @@ This selective disclosure model is unique. It protects remittance users from exp
 | Block Time | ~6 seconds |
 | Consensus | BABE/GRANDPA (PoS) |
 | SDK | Polkadot SDK stable2512 |
+| TPS | 2,000-3,000 transparent / 500-800 mixed private |
+| Base Fee | 0.1 Gwei (~0.001 ARX per transfer) |
+| Block Size | 10MB |
 
 ## Connect MetaMask
 

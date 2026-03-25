@@ -514,6 +514,9 @@ mod runtime {
 
 	#[runtime::pallet_index(13)]
 	pub type Privacy = pallet_privacy;
+
+	#[runtime::pallet_index(14)]
+	pub type ArxClaim = pallet_arx_claim;
 }
 
 #[derive(Clone)]
@@ -1106,4 +1109,10 @@ impl pallet_mining::Config for Runtime {
 
 impl pallet_privacy::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
+}
+
+impl pallet_arx_claim::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+    type Currency = Balances;
+    type WeightInfo = ();
 }

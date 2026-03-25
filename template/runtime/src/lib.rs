@@ -200,13 +200,14 @@ pub fn native_version() -> sp_version::NativeVersion {
 }
 
 const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(75);
-/// We allow for 2000ms of compute with a 6 second average block time.
-pub const WEIGHT_MILLISECS_PER_BLOCK: u64 = 2000;
+/// We allow for 4000ms of compute with a 6 second average block time.
+/// Arxon target: 2000-3000 TPS transparent, 500-800 TPS mixed private/public.
+pub const WEIGHT_MILLISECS_PER_BLOCK: u64 = 4000;
 pub const MAXIMUM_BLOCK_WEIGHT: Weight = Weight::from_parts(
 	WEIGHT_MILLISECS_PER_BLOCK * WEIGHT_REF_TIME_PER_MILLIS,
 	u64::MAX,
 );
-pub const MAXIMUM_BLOCK_LENGTH: u32 = 5 * 1024 * 1024;
+pub const MAXIMUM_BLOCK_LENGTH: u32 = 10 * 1024 * 1024; // 10MB - Arxon increased block size
 
 parameter_types! {
 	pub const Version: RuntimeVersion = VERSION;
@@ -405,7 +406,7 @@ impl pallet_dynamic_fee::Config for Runtime {
 }
 
 parameter_types! {
-	pub DefaultBaseFeePerGas: U256 = U256::from(1_000_000_000);
+	pub DefaultBaseFeePerGas: U256 = U256::from(100_000_000); // 0.1 Gwei - cheap for remittances
 	pub DefaultElasticity: Permill = Permill::from_parts(125_000);
 }
 pub struct BaseFeeThreshold;

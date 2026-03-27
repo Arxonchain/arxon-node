@@ -517,6 +517,9 @@ mod runtime {
 
 	#[runtime::pallet_index(14)]
 	pub type ArxClaim = pallet_arx_claim;
+
+	#[runtime::pallet_index(15)]
+	pub type PTR = pallet_ptr;
 }
 
 #[derive(Clone)]
@@ -1115,4 +1118,9 @@ impl pallet_arx_claim::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type Currency = Balances;
     type WeightInfo = ();
+}
+
+impl pallet_ptr::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+    type Balance = Balance;
 }

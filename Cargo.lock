@@ -653,6 +653,7 @@ dependencies = [
  "pallet-grandpa",
  "pallet-mining",
  "pallet-privacy",
+ "pallet-ptr",
  "pallet-sudo",
  "pallet-timestamp",
  "pallet-transaction-payment",
@@ -7618,6 +7619,17 @@ dependencies = [
 
 [[package]]
 name = "pallet-privacy"
+version = "0.1.0"
+dependencies = [
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "parity-scale-codec",
+ "scale-info",
+]
+
+[[package]]
+name = "pallet-ptr"
 version = "0.1.0"
 dependencies = [
  "frame-benchmarking",

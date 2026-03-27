@@ -61,6 +61,7 @@ pallet-ethereum = { workspace = true }
 pallet-mining = { workspace = true }
 pallet-privacy = { workspace = true }
 pallet-arx-claim = { workspace = true }
+pallet-ptr = { workspace = true }
 pallet-evm = { workspace = true }
 pallet-evm-chain-id = { workspace = true }
 pallet-evm-precompile-curve25519 = { workspace = true }

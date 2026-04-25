@@ -44,6 +44,7 @@ members = [
 	"template/pallets/privacy",
 	"template/pallets/arx-claim",
 	"template/pallets/ptr",
+	"template/pallets/trust-registry",
 	"precompiles",
 	"precompiles/macro",
 	"precompiles/tests-external",
@@ -235,6 +236,7 @@ pallet-mining = { path = "template/pallets/mining", default-features = false }
 pallet-privacy = { path = "template/pallets/privacy", default-features = false }
 pallet-arx-claim = { path = "template/pallets/arx-claim", default-features = false }
 pallet-ptr = { path = "template/pallets/ptr", default-features = false }
+pallet-trust-registry = { path = "template/pallets/trust-registry", default-features = false }
 
 [profile.release]
 # Substrate runtime requires unwinding.

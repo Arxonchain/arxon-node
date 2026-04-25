@@ -520,6 +520,9 @@ mod runtime {
 
 	#[runtime::pallet_index(15)]
 	pub type PTR = pallet_ptr;
+
+	#[runtime::pallet_index(16)]
+	pub type TrustRegistry = pallet_trust_registry;
 }
 
 #[derive(Clone)]
@@ -1123,4 +1126,16 @@ impl pallet_arx_claim::Config for Runtime {
 impl pallet_ptr::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type Balance = Balance;
+}
+
+impl pallet_trust_registry::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+    // Bronze: ~3 months at 6s blocks (90 days * 86400s / 6s)
+    type BronzeMinLockBlocks = ConstU32<1296000>;
+    // Silver: ~6 months
+    type SilverMinLockBlocks = ConstU32<2592000>;
+    // Gold: ~12 months
+    type GoldMinLockBlocks = ConstU32<5184000>;
+    // 100 unique alerts to auto-flag
+    type AlertThreshold = ConstU32<100>;
 }

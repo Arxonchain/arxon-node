@@ -63,6 +63,7 @@ pallet-privacy = { workspace = true }
 pallet-arx-claim = { workspace = true }
 pallet-ptr = { workspace = true }
 pallet-trust-registry = { workspace = true }
+pallet-quantum-account = { workspace = true }
 pallet-evm = { workspace = true }
 pallet-evm-chain-id = { workspace = true }
 pallet-evm-precompile-curve25519 = { workspace = true }
@@ -139,6 +140,7 @@ std = [
 	"polkadot-runtime-common/std",
 	# Cumulus primitives
 	"cumulus-pallet-weight-reclaim/std",
+	"pallet-quantum-account/std",
 ]
 runtime-benchmarks = [
 	"frame-benchmarking/runtime-benchmarks",

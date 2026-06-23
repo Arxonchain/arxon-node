@@ -31,3 +31,4 @@ polkadot.*
 
 # NixOS development environment
 .envrc
+*.log

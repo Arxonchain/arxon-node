@@ -523,6 +523,11 @@ mod runtime {
 
 	#[runtime::pallet_index(16)]
 	pub type TrustRegistry = pallet_trust_registry;
+
+    // Post-quantum layer — ML-DSA-65 (NIST FIPS 204)
+    // Native Arxon accounts are quantum-resistant by default.
+    #[runtime::pallet_index(17)]
+    pub type QuantumAccount = pallet_quantum_account;
 }
 
 #[derive(Clone)]
@@ -1138,4 +1143,9 @@ impl pallet_trust_registry::Config for Runtime {
     type GoldMinLockBlocks = ConstU32<5184000>;
     // 100 unique alerts to auto-flag
     type AlertThreshold = ConstU32<100>;
+}
+
+impl pallet_quantum_account::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+    type RuntimeCall = RuntimeCall;
 }

@@ -45,6 +45,7 @@ members = [
 	"template/pallets/arx-claim",
 	"template/pallets/ptr",
 	"template/pallets/trust-registry",
+	"template/pallets/quantum-account",
 	"precompiles",
 	"precompiles/macro",
 	"precompiles/tests-external",
@@ -58,6 +59,7 @@ edition = "2021"
 repository = "https://github.com/Arxonchain/arxon-node"
 
 [workspace.dependencies]
+ml-dsa = { version = "0.1.0-rc.8", default-features = false }
 async-trait = "0.1"
 bitflags = "1.3.2"
 bn = { package = "substrate-bn", version = "0.6", default-features = false }
@@ -237,6 +239,7 @@ pallet-privacy = { path = "template/pallets/privacy", default-features = false }
 pallet-arx-claim = { path = "template/pallets/arx-claim", default-features = false }
 pallet-ptr = { path = "template/pallets/ptr", default-features = false }
 pallet-trust-registry = { path = "template/pallets/trust-registry", default-features = false }
+pallet-quantum-account = { path = "template/pallets/quantum-account", default-features = false }
 
 [profile.release]
 # Substrate runtime requires unwinding.

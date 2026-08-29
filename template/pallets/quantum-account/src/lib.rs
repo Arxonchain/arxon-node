@@ -193,7 +193,9 @@ pub mod pallet {
                 Error::<T>::InvalidSignature
             );
 
-            // 5. Advance nonce BEFORE dispatch (reentrancy safe)
+            // 5. Advance nonce before inner dispatch so a reentrant inner call sees the new value.
+            // If this extrinsic returns Err, FRAME rolls the nonce change back. A failed inner
+            // call can be retried with the same ML-DSA signature.
             let new_nonce = nonce.checked_add(1).ok_or(Error::<T>::NonceOverflow)?;
             QuantumNonces::<T>::insert(&quantum_signer, new_nonce);
 

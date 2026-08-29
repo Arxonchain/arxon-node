@@ -67,6 +67,7 @@ pub use pallet_balances::Call as BalancesCall;
 pub use pallet_timestamp::Call as TimestampCall;
 
 use precompiles::FrontierPrecompiles;
+pub use precompiles::ARXON_ZK_PRECOMPILE;
 
 /// Type of block number.
 pub type BlockNumber = u32;
@@ -534,6 +535,9 @@ mod runtime {
 	// Post-quantum layer: ML-DSA-65 (NIST FIPS 204). Opt-in via register_quantum_key.
 	#[runtime::pallet_index(17)]
 	pub type QuantumAccount = pallet_quantum_account;
+
+	// Reserved for ZK. Do not assign other pallets these indices:
+	// 18 verifier, 19 nullifier registry, 20 note / membership tree (not index 16).
 }
 
 #[derive(Clone)]

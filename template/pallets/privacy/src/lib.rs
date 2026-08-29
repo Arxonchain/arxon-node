@@ -15,6 +15,35 @@ pub mod pallet {
         pub fn is_any_private(&self) -> bool {
             self.hide_sender || self.hide_receiver || self.hide_amount || self.hide_balance
         }
+
+        /// Circuit 1 public-input packing. Do not reorder these bits.
+        /// bit 0 = hide_sender, bit 1 = hide_receiver, bit 2 = hide_amount, bit 3 = hide_balance.
+        pub const fn as_bits(&self) -> u8 {
+            let mut bits = 0u8;
+            if self.hide_sender {
+                bits |= 1;
+            }
+            if self.hide_receiver {
+                bits |= 2;
+            }
+            if self.hide_amount {
+                bits |= 4;
+            }
+            if self.hide_balance {
+                bits |= 8;
+            }
+            bits
+        }
+
+        /// Inverse of `as_bits`. Higher bits are ignored.
+        pub const fn from_bits(bits: u8) -> Self {
+            Self {
+                hide_sender: bits & 1 != 0,
+                hide_receiver: bits & 2 != 0,
+                hide_amount: bits & 4 != 0,
+                hide_balance: bits & 8 != 0,
+            }
+        }
     }
     #[pallet::pallet]
     pub struct Pallet<T>(_);
@@ -70,5 +99,33 @@ pub mod pallet {
             Self::deposit_event(Event::BalanceVisibilitySet { who, hidden });
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod mask_bits {
+    use super::PrivacyMask;
+
+    #[test]
+    fn four_flag_packing_is_stable() {
+        let empty = PrivacyMask::from_bits(0);
+        assert_eq!(empty.as_bits(), 0);
+        assert!(!empty.is_any_private());
+
+        let all = PrivacyMask {
+            hide_sender: true,
+            hide_receiver: true,
+            hide_amount: true,
+            hide_balance: true,
+        };
+        assert_eq!(all.as_bits(), 0b1111);
+        assert_eq!(PrivacyMask::from_bits(0b1111).as_bits(), 0b1111);
+
+        let sender_amount = PrivacyMask::from_bits(0b0101);
+        assert!(sender_amount.hide_sender);
+        assert!(!sender_amount.hide_receiver);
+        assert!(sender_amount.hide_amount);
+        assert!(!sender_amount.hide_balance);
+        assert_eq!(sender_amount.as_bits(), 0b0101);
     }
 }

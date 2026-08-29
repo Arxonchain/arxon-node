@@ -13,6 +13,8 @@ Most blockchains force a choice between full transparency and full privacy. Arxo
 
 Those four flags are stored in the runtime today. They are not yet cryptographically enforced. Halo2 proofs are the next layer of work.
 
+This is **selective privacy**: the user picks, per transaction, which of those fields to hide or reveal. The same four flags apply on the native Arxon path and on the EVM (Frontier / MetaMask / Solidity) path. ZK will enforce that one model on both. It is not three modes, and EVM is not left fully public.
+
 This selective disclosure model is meant to protect remittance users from exposure while keeping a path for exchanges and regulators to verify a transaction when a party chooses to disclose it.
 
 ## Key Features
@@ -20,7 +22,7 @@ This selective disclosure model is meant to protect remittance users from exposu
 * Sovereign L1, independent consensus (AURA + GRANDPA)
 * ARX native token, 1,000,000,000 total supply, 18 decimal places
 * EVM compatible: Solidity, MetaMask, Ethereum tooling (Frontier)
-* Selective privacy flags (application layer until ZK lands)
+* Selective privacy flags on native and EVM (application layer until ZK lands)
 * Private transaction receipts and single use disclosure codes (plaintext on chain until ZK lands)
 * ARX-P mining points and an on chain claim pallet (claim does not yet move balances)
 * Anti rug trust registry for projects (Bronze / Silver / Gold)
@@ -114,13 +116,13 @@ All Arxon pallets live under `template/pallets/<name>/` and are registered in `t
 | Index | Crate | What it does |
 |---|---|---|
 | 12 | pallet-mining | ARX-P points. `register_miner`, sudo `credit_points`. |
-| 13 | pallet-privacy | Four flag `PrivacyMask`. Defaults, per tx record, balance visibility. Not hooked into transfers. |
+| 13 | pallet-privacy | Four flag `PrivacyMask`. Bit packing: `as_bits` (sender, receiver, amount, balance). Defaults, per tx record, balance visibility. Not hooked into transfers. |
 | 14 | pallet-arx-claim | Snapshot and `claim_arx`. Records the claim; it does not yet mint or transfer ARX. |
 | 15 | pallet-ptr | Private transaction receipts and disclosure codes. `create_receipt` is root only. Receipts store plaintext. |
 | 16 | pallet-trust-registry | Project anti rug badges and liquidity lock tiers. Not the ZK exchange membership tree. |
 | 17 | pallet-quantum-account | ML-DSA-65 register / deregister / `quantum_dispatch`. Opt in. ECDSA still signs the outer extrinsic. |
 
-Frontier EVM pallets occupy indices 7 through 11. Indices after 17 are free for the ZK verifier, nullifier registry, and note tree.
+Frontier EVM pallets occupy indices 7 through 11. Indices 18 (verifier), 19 (nullifiers), and 20 (note tree) are reserved for ZK. EVM precompile `0x800` is reserved for proof verification; it reverts until the verifier lands.
 
 ## Roadmap
 

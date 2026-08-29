@@ -1,4 +1,5 @@
 use core::marker::PhantomData;
+use fp_evm::{ExitRevert, PrecompileFailure};
 use pallet_evm::{
 	IsPrecompileResult, Precompile, PrecompileHandle, PrecompileResult, PrecompileSet,
 };
@@ -9,6 +10,9 @@ use pallet_evm_precompile_modexp::Modexp;
 use pallet_evm_precompile_sha3fips::Sha3FIPS256;
 use pallet_evm_precompile_simple::{ECRecover, ECRecoverPublicKey, Identity, Ripemd160, Sha256};
 
+/// Halo2 privacy verifier (Circuit 1+). Stub until ZK lands so nothing can deploy here.
+pub const ARXON_ZK_PRECOMPILE: u64 = 0x800;
+
 pub struct FrontierPrecompiles<R>(PhantomData<R>);
 
 impl<R> FrontierPrecompiles<R>
@@ -18,7 +22,7 @@ where
 	pub fn new() -> Self {
 		Self(Default::default())
 	}
-	pub fn used_addresses() -> [H160; 9] {
+	pub fn used_addresses() -> [H160; 10] {
 		[
 			hash(1),
 			hash(2),
@@ -29,6 +33,7 @@ where
 			hash(1025),
 			hash(1026),
 			hash(1027),
+			hash(ARXON_ZK_PRECOMPILE),
 		]
 	}
 }
@@ -59,6 +64,7 @@ where
 				R,
 				crate::weights::pallet_evm_precompile_curve25519::WeightInfo<R>,
 			>::execute(handle)),
+			a if a == hash(ARXON_ZK_PRECOMPILE) => Some(reserved_zk_precompile(handle)),
 			_ => None,
 		}
 	}
@@ -73,4 +79,12 @@ where
 
 fn hash(a: u64) -> H160 {
 	H160::from_low_u64_be(a)
+}
+
+fn reserved_zk_precompile(handle: &mut impl PrecompileHandle) -> PrecompileResult {
+	handle.record_cost(100)?;
+	Err(PrecompileFailure::Revert {
+		exit_status: ExitRevert::Reverted,
+		output: b"ARXON_ZK_PRECOMPILE_RESERVED".to_vec(),
+	})
 }

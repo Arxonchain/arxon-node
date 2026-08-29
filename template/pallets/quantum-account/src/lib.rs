@@ -113,7 +113,8 @@ pub mod pallet {
     #[pallet::call]
     impl<T: Config> Pallet<T> {
         /// Register an ML-DSA-65 public key for the caller's account.
-        /// After this, use quantum_dispatch for all future transactions.
+        /// After this, `quantum_dispatch` can authenticate inner calls with that key.
+        /// Ordinary signed extrinsics still work unless a later policy disables them.
         #[pallet::call_index(0)]
         #[pallet::weight(Weight::from_parts(150_000_000, 2048))]
         pub fn register_quantum_key(

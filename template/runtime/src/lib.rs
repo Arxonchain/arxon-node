@@ -190,6 +190,13 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	system_version: 1,
 };
 
+/// Canonical EVM chain id for every Arxon chain spec.
+pub const ARXON_EVM_CHAIN_ID: u64 = 7171;
+/// Native ARX decimal places (MetaMask and genesis must match).
+pub const ARX_DECIMALS: u8 = 18;
+/// One whole ARX in base units.
+pub const ARX_UNIT: u128 = 1_000_000_000_000_000_000;
+
 /// The version information used to identify this runtime when compiled natively.
 #[cfg(feature = "std")]
 pub fn native_version() -> sp_version::NativeVersion {
@@ -524,10 +531,9 @@ mod runtime {
 	#[runtime::pallet_index(16)]
 	pub type TrustRegistry = pallet_trust_registry;
 
-    // Post-quantum layer — ML-DSA-65 (NIST FIPS 204)
-    // Native Arxon accounts are quantum-resistant by default.
-    #[runtime::pallet_index(17)]
-    pub type QuantumAccount = pallet_quantum_account;
+	// Post-quantum layer: ML-DSA-65 (NIST FIPS 204). Opt-in via register_quantum_key.
+	#[runtime::pallet_index(17)]
+	pub type QuantumAccount = pallet_quantum_account;
 }
 
 #[derive(Clone)]

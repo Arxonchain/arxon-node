@@ -1,11 +1,11 @@
 [package]
 name = "pallet-trust-registry"
 version = "0.1.0"
-authors = ["Arxon Team <dev@arxon.io>"]
-edition = "2021"
+authors = { workspace = true }
+edition = { workspace = true }
 license = "Unlicense"
 homepage = "https://arxon.io"
-repository = "https://github.com/Arxonchain/arxon-node"
+repository = { workspace = true }
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]

@@ -1,26 +1,31 @@
 # Arxon Node
 
-Arxon is a sovereign Layer-1 blockchain built for the unbanked and diaspora communities, starting from Nigeria. It combines selective transaction privacy, full EVM compatibility, and a mobile-first mining system,all on a single chain.
+Arxon is a sovereign Layer 1 blockchain built for the unbanked and diaspora communities, starting from Nigeria. It combines selective transaction privacy, full EVM compatibility, and a mobile first mining system on a single chain.
 
 ## What Makes Arxon Different
 
-Most blockchains force a choice between full transparency and full privacy. Arxon gives users complete control per transaction, you choose exactly what to hide:
+Most blockchains force a choice between full transparency and full privacy. Arxon lets the user choose, per transaction, exactly what to hide:
 
-- Hide sender
-- Hide receiver  
-- Hide amount
-- Hide wallet balance
+* Hide sender
+* Hide receiver
+* Hide amount
+* Hide wallet balance
 
-This selective disclosure model is unique. It protects remittance users from exposure while keeping the chain auditable for exchanges and regulators.
+Those four flags are stored in the runtime today. They are not yet cryptographically enforced. Halo2 proofs are the next layer of work.
+
+This selective disclosure model is meant to protect remittance users from exposure while keeping a path for exchanges and regulators to verify a transaction when a party chooses to disclose it.
 
 ## Key Features
 
-- **Sovereign L1** — Not a fork, not a sidechain. Arxon is its own independent blockchain with its own consensus (BABE/GRANDPA)
-- **ARX Token** — Native token with 1,000,000,000 total supply and 12 decimal places
-- **EVM Compatible** — Deploy Solidity smart contracts. Connect MetaMask. Use any Ethereum tooling
-- **Selective Privacy** — Per-transaction privacy flags for sender, receiver, amount, and balance
-- **Mining System** — Browser and mobile mining via ARX-P points, convertible to ARX at mainnet
-- **Chain ID** — 7171
+* Sovereign L1, independent consensus (AURA + GRANDPA)
+* ARX native token, 1,000,000,000 total supply, 18 decimal places
+* EVM compatible: Solidity, MetaMask, Ethereum tooling (Frontier)
+* Selective privacy flags (application layer until ZK lands)
+* Private transaction receipts and single use disclosure codes (plaintext on chain until ZK lands)
+* ARX-P mining points and an on chain claim pallet (claim does not yet move balances)
+* Anti rug trust registry for projects (Bronze / Silver / Gold)
+* Post quantum account layer: ML-DSA-65, opt in
+* EVM chain ID 7171
 
 ## Token Distribution
 
@@ -38,40 +43,40 @@ This selective disclosure model is unique. It protects remittance users from exp
 |---|---|
 | Chain ID (EVM) | 7171 |
 | Token Symbol | ARX |
-| Decimals | 12 |
+| Decimals | 18 |
 | Block Time | ~6 seconds |
-| Consensus | BABE/GRANDPA (PoS) |
+| Consensus | AURA + GRANDPA |
 | SDK | Polkadot SDK stable2512 |
-| TPS | 2,000-3,000 transparent / 500-800 mixed private |
-| Base Fee | 0.1 Gwei (~0.001 ARX per transfer) |
+| Rust | 1.88.0 (`rust-toolchain.toml`) |
+| Base Fee | 0.1 Gwei |
 | Block Size | 10MB |
+| Runtime spec_name | arxon |
+
+Dev and local testnet specs both use chain ID 7171. Do not use 42.
 
 ## Connect MetaMask
 
 1. Open MetaMask → Add Network → Add manually
-2. Network Name: `Arxon Dev`
+2. Network Name: `Arxon`
 3. RPC URL: `http://YOUR_NODE_IP:9944`
 4. Chain ID: `7171`
 5. Currency Symbol: `ARX`
+6. Decimals: `18`
 
 ## Run a Node
 
 ### Prerequisites
 
-- Ubuntu 22.04 or later
-- Rust (nightly toolchain)
-- 4GB RAM minimum
-- libclang, protobuf-compiler
+* Ubuntu 22.04 or later
+* Rust 1.88.0 (the repo pins this in `rust-toolchain.toml`)
+* 4GB RAM minimum
+* libclang, protobuf-compiler
 
 ### Install Dependencies
 ```bash
-# Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env
-rustup install nightly
-rustup target add wasm32-unknown-unknown --toolchain nightly
-
-# Install system dependencies
+# rust-toolchain.toml selects 1.88.0 and wasm32v1-none
 sudo apt-get install -y libclang-dev clang protobuf-compiler
 ```
 
@@ -92,36 +97,48 @@ cargo build --release -p arxon-node
 ./target/release/arxon-node --dev --rpc-external --unsafe-rpc-external
 ```
 
-## Custom Pallets
+## Custom pallets
 
-### pallet-mining
-Tracks ARX-P mining points per account. Foundation for the ARX claim system at mainnet.
-- `register_miner()` — Register as a miner
-- `credit_points()` — Sudo: credit points to an account
+All Arxon pallets live under `template/pallets/<name>/` and are registered in `template/runtime/src/lib.rs`.
 
-### pallet-privacy
-Selective privacy per transaction. Users control exactly what information is visible on-chain.
-- `set_privacy_default()` — Set default privacy preferences
-- `record_tx_privacy()` — Record privacy mask for a specific transaction
-- `set_balance_visibility()` — Toggle wallet balance visibility
+| Index | Crate | What it does |
+|---|---|---|
+| 12 | pallet-mining | ARX-P points. `register_miner`, sudo `credit_points`. |
+| 13 | pallet-privacy | Four flag `PrivacyMask`. Defaults, per tx record, balance visibility. Not hooked into transfers. |
+| 14 | pallet-arx-claim | Snapshot and `claim_arx`. Records the claim; it does not yet mint or transfer ARX. |
+| 15 | pallet-ptr | Private transaction receipts and disclosure codes. `create_receipt` is root only. Receipts store plaintext. |
+| 16 | pallet-trust-registry | Project anti rug badges and liquidity lock tiers. Not the ZK exchange membership tree. |
+| 17 | pallet-quantum-account | ML-DSA-65 register / deregister / `quantum_dispatch`. Opt in. ECDSA still signs the outer extrinsic. |
+
+Frontier EVM pallets occupy indices 7 through 11. Indices after 17 are free for the ZK verifier, nullifier registry, and note tree.
 
 ## Roadmap
 
-- [x] Sovereign L1 chain with ARX token
-- [x] Mining pallet (ARX-P points system)
-- [x] Selective privacy pallet
-- [x] EVM compatibility (Frontier)
-- [x] Real 1B ARX genesis supply
-- [ ] Multi-node public testnet
-- [ ] ARX claim pallet for miners
-- [ ] Halo2 ZK proof integration
-- [ ] Mainnet launch (early 2027)
+Done:
+
+* Sovereign L1 with ARX genesis (1B, 18 decimals)
+* EVM / Frontier, chain ID 7171
+* Mining pallet
+* Privacy flag pallet (application layer)
+* PTR pallet (application layer)
+* ARX claim pallet (snapshot path; payout incomplete)
+* Trust registry (anti rug)
+* Quantum account pallet (ML-DSA-65, opt in)
+
+Next:
+
+* Public testnet, explorer, faucet, validator set
+* Complete ARX claim so it actually pays from the mining allocation
+* Halo2 circuits and runtime enforcement of the four privacy flags
+* Nullifier set, note commitment tree, ZK verifier host function
+* EVM precompile for proof verification
+* Mainnet
 
 ## Community
 
-- Website: [arxon.io](https://arxon.io)
-- Twitter: [@Arxonarx](https://twitter.com/Arxonarx)
-- Mining App: Join 1M+ miners earning ARX-P points
+* Website: [arxon.io](https://arxon.io)
+* Twitter: [@Arxonarx](https://twitter.com/Arxonarx)
+* Mining app: [arxonchain.xyz](https://arxonchain.xyz)
 
 ## License
 

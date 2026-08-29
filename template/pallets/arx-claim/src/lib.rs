@@ -42,7 +42,7 @@ pub mod pallet {
         StorageMap<_, Blake2_128Concat, T::AccountId, bool, ValueQuery>;
 
     /// How many ARX units per 1 ARX-P point (set by sudo)
-    /// Default: 1 ARX-P = 1_000_000_000_000 units (1 ARX)
+    /// Default until sudo sets a ratio: 0. One whole ARX is `ARX_UNIT` (18 decimals).
     #[pallet::storage]
     pub type ArxPerPoint<T: Config> = StorageValue<_, u64, ValueQuery>;
 

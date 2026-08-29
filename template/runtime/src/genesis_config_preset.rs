@@ -15,7 +15,7 @@ use sp_std::prelude::*;
 /// ARX: 1,000,000,000 total supply, 18 decimals (see `ARX_UNIT`).
 pub fn development() -> serde_json::Value {
 	testnet_genesis(
-		// Sudo account (Treasury)
+		// DEV ONLY. Well-known Alith test account. Public private key. Not for public networks.
 		AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
 		// Genesis accounts with real ARX allocations
 		vec![

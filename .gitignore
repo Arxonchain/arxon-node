@@ -31,4 +31,11 @@ polkadot.*
 
 # NixOS development environment
 .envrc
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+secrets/
 *.log

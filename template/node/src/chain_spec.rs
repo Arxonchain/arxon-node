@@ -61,7 +61,8 @@ pub fn development_config(enable_manual_seal: bool) -> ChainSpec {
 		.with_chain_type(ChainType::Development)
 		.with_properties(properties())
 		.with_genesis_config_patch(testnet_genesis(
-			// Sudo account (Alith)
+			// DEV ONLY. Well-known Alith test account (public key). Anyone can sudo
+			// a node that uses this genesis. Replace before any public testnet or mainnet.
 			AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
 			// Pre-funded accounts
 			vec![
@@ -71,7 +72,7 @@ pub fn development_config(enable_manual_seal: bool) -> ChainSpec {
 				(AccountId::from(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")), 150_000_000u128 * ARX_UNIT), // Team 15%
 				(AccountId::from(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")), 100_000_000u128 * ARX_UNIT), // Staking 10%
 			],
-			// Initial PoA authorities
+			// Initial PoA authorities from well-known //Alice seed. DEV ONLY.
 			vec![authority_keys_from_seed("Alice")],
 			// Ethereum chain ID
 			ARXON_EVM_CHAIN_ID,
@@ -87,7 +88,8 @@ pub fn local_testnet_config() -> ChainSpec {
 		.with_chain_type(ChainType::Local)
 		.with_properties(properties())
 		.with_genesis_config_patch(testnet_genesis(
-			// Sudo account (Alith)
+			// DEV ONLY. Well-known Alith test account (public key). Anyone can sudo
+			// a node that uses this genesis. Replace before any public testnet or mainnet.
 			AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
 			// Pre-funded accounts
 			vec![

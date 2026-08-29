@@ -92,10 +92,20 @@ cargo build --release -p arxon-node
 ./target/release/arxon-node --dev
 ```
 
-### Run with External RPC (for MetaMask/dApps)
+`--dev` uses well-known test keys (Alith as sudo and treasury, `//Alice` as the Aura/GRANDPA authority). Those private keys are public. Anyone can control a node that ships this genesis. Use `--dev` on a machine you trust. Do not use this genesis for a public testnet or mainnet. Generate fresh sudo, treasury, and validator keys first.
+
+`--rpc-external --unsafe-rpc-external` opens RPC to other machines and disables origin checks. That is for a local MetaMask session only. Do not expose it on the public internet.
+
 ```bash
 ./target/release/arxon-node --dev --rpc-external --unsafe-rpc-external
 ```
+
+## Security notes
+
+* The privacy pallet does not hide data from a full node. Treat flags as application metadata until Halo2 is live.
+* PTR receipts currently store plaintext. Do not treat them as cryptographic privacy.
+* Quantum accounts are opt in. ECDSA can still register or remove a quantum key.
+* Do not commit `.env`, keystores, or mnemonic files. The well-known Alith key in Frontier docs is for local `--dev` only.
 
 ## Custom pallets
 

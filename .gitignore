@@ -38,4 +38,5 @@ polkadot.*
 *.key
 *.p12
 secrets/
+branding/
 *.log

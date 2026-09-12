@@ -1,0 +1,35 @@
+[package]
+name = "arxon-zk-host"
+version = "0.1.0"
+license = "Unlicense"
+description = "Host function verify_halo2_ipa: the runtime's only door to the native Halo2 verifier."
+authors = { workspace = true }
+edition = { workspace = true }
+repository = { workspace = true }
+publish = false
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(substrate_runtime)'] }
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+arxon-zk = { workspace = true, optional = true }
+arxon-zk-primitives = { workspace = true }
+log = { workspace = true, optional = true }
+scale-codec = { workspace = true }
+sp-runtime-interface = { workspace = true }
+
+[dev-dependencies]
+rand_chacha = { workspace = true }
+
+[features]
+default = ["std"]
+std = [
+	"arxon-zk",
+	"arxon-zk-primitives/std",
+	"log",
+	"scale-codec/std",
+	"sp-runtime-interface/std",
+]

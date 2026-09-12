@@ -54,6 +54,8 @@ members = [
 	"crates/zk",
 	"template/pallets/nullifier-registry",
 	"template/pallets/note-tree",
+	"template/pallets/zk-verifier",
+	"template/primitives/zk-host",
 ]
 resolver = "2"
 

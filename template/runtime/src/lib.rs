@@ -1190,8 +1190,7 @@ impl pallet_privacy::Config for Runtime {
 	type ZkVerifier = ZkVerifier;
 	type Nullifiers = NullifierRegistry;
 	type Trees = NoteTree;
-	// pallet-ptr takes over once it is rewritten to commitments (plan Phase F).
-	type Receipts = ();
+	type Receipts = PTR;
 	type WeightInfo = ();
 }
 
@@ -1201,7 +1200,9 @@ impl pallet_arx_claim::Config for Runtime {
 }
 
 impl pallet_ptr::Config for Runtime {
-	type Balance = Balance;
+	type ZkVerifier = ZkVerifier;
+	type MaxProofValidity = ConstU32<128>;
+	type WeightInfo = ();
 }
 
 impl pallet_trust_registry::Config for Runtime {

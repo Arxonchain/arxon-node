@@ -8,12 +8,13 @@ use sp_runtime::DispatchError;
 
 use crate::{
 	mock::{
-		new_test_ext, Balances, FakeVerifier, NoteTree, NullifierRegistry, Privacy, RuntimeCall,
-		RuntimeEvent, RuntimeOrigin, System, Test, ALICE, ALICE_BALANCE, BOB, RELAYER, UNIT,
+		new_test_ext, Balances, FakeVerifier, NoteTree, NullifierRegistry, Privacy, RecordingSink,
+		RuntimeCall, RuntimeEvent, RuntimeOrigin, System, Test, ALICE, ALICE_BALANCE, BOB, RELAYER,
+		UNIT,
 	},
 	pallet::{Intent, ValueFlow},
-	Error, Event, Input, Inputs, Output, Outputs, PrivacyMask, ProofBundle, ShieldedTxCount,
-	TxPrivacyMask,
+	ComplianceAttachment, Error, Event, Input, Inputs, Output, Outputs, PrivacyMask, ProofBundle,
+	PtrAttachment, ShieldedTxCount, TxPrivacyMask,
 };
 
 // --- builders -----------------------------------------------------------------------------------
@@ -58,6 +59,16 @@ fn bundle(spend: bool, output: bool) -> ProofBundle {
 		spend: spend.then(|| proof(3)),
 		output: output.then(|| proof(1)),
 		balance: proof(2),
+		receipt: None,
+		compliance: None,
+	}
+}
+
+fn full_bundle(receipt: bool, compliance: bool) -> ProofBundle {
+	ProofBundle {
+		receipt: receipt.then(|| proof(4)),
+		compliance: compliance.then(|| proof(6)),
+		..bundle(true, true)
 	}
 }
 
@@ -88,7 +99,29 @@ fn transfer(anchor: FieldBytes, ins: Inputs, outs: Outputs, mask: u8) -> Result<
 		outs,
 		mask,
 		EXPIRY,
+		None,
+		None,
 		bundle(true, true),
+	)
+}
+
+fn transfer_with(
+	anchor: FieldBytes,
+	outs: Outputs,
+	ptr: Option<PtrAttachment>,
+	compliance: Option<ComplianceAttachment>,
+	proofs: ProofBundle,
+) -> Result<(), DispatchError> {
+	Privacy::submit_private_transfer(
+		RuntimeOrigin::signed(RELAYER),
+		anchor,
+		inputs(vec![input(10, 11)]),
+		outs,
+		0,
+		EXPIRY,
+		ptr,
+		compliance,
+		proofs,
 	)
 }
 
@@ -100,9 +133,8 @@ fn unshield(
 	outs: Outputs,
 ) -> Result<(), DispatchError> {
 	let proofs = ProofBundle {
-		spend: Some(proof(3)),
 		output: (!outs.is_empty()).then(|| proof(1)),
-		balance: proof(2),
+		..bundle(true, false)
 	};
 	Privacy::unshield(
 		RuntimeOrigin::signed(RELAYER),
@@ -908,6 +940,8 @@ fn unshield_binds_recipient_and_transparent_out_into_the_digest() {
 			mask_bits: 0,
 			expiry_block: EXPIRY,
 			proofs: bundle(true, false),
+			ptr: None,
+			compliance: None,
 			value: ValueFlow::Unshield {
 				recipient: BOB,
 				amount: 42 * UNIT,
@@ -949,6 +983,8 @@ fn to_bob_clone(i: &Intent<Test>) -> Intent<Test> {
 		mask_bits: i.mask_bits,
 		expiry_block: i.expiry_block,
 		proofs: i.proofs.clone(),
+		ptr: None,
+		compliance: None,
 		value: ValueFlow::Transfer,
 	}
 }
@@ -1018,6 +1054,8 @@ fn dispatch_through_runtime_call_rolls_back_partial_writes_on_error() {
 			outputs: outputs(vec![output(20, 21)]),
 			mask_bits: 0,
 			expiry_block: EXPIRY,
+			ptr: None,
+			compliance: None,
 			proofs: bundle(true, true),
 		});
 
@@ -1042,9 +1080,197 @@ fn any_signer_can_relay_a_bundle() {
 			outputs(vec![output(20, 21)]),
 			0,
 			EXPIRY,
+			None,
+			None,
 			bundle(true, true),
 		);
 
 		assert_ok!(relayed);
+	});
+}
+
+// --- receipts and compliance -------------------------------------------------------------------
+
+#[test]
+fn private_transfer_with_receipt_verifies_circuit_4_against_the_payment_output_cv() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		FakeVerifier::reset();
+		let ptr = PtrAttachment {
+			payment_output_index: 1,
+			ptr_id: fb(0x50),
+		};
+
+		assert_ok!(transfer_with(
+			anchor,
+			outputs(vec![output(20, 21), output(22, 23)]),
+			Some(ptr),
+			None,
+			full_bundle(true, false)
+		));
+
+		let c4 = FakeVerifier::calls()
+			.into_iter()
+			.find(|c| c.circuit_id == CircuitId::PtrGeneration)
+			.expect("C4 verified");
+		assert_eq!(c4.public_inputs[0][0], fb(0x50), "ptr id");
+		assert_eq!(c4.public_inputs[0][1], fb(23), "cv of output 1");
+	});
+}
+
+#[test]
+fn private_transfer_with_receipt_records_it_in_the_sink() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		let ptr = PtrAttachment {
+			payment_output_index: 0,
+			ptr_id: fb(0x50),
+		};
+
+		assert_ok!(transfer_with(
+			anchor,
+			outputs(vec![output(20, 21)]),
+			Some(ptr),
+			None,
+			full_bundle(true, false)
+		));
+
+		assert_eq!(RecordingSink::recorded(), vec![(fb(0x50), fb(21), 0)]);
+	});
+}
+
+#[test]
+fn private_transfer_fails_when_receipt_proof_is_missing_or_unexpected() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		let ptr = PtrAttachment {
+			payment_output_index: 0,
+			ptr_id: fb(0x50),
+		};
+
+		assert_noop!(
+			transfer_with(
+				anchor,
+				outputs(vec![output(20, 21)]),
+				Some(ptr),
+				None,
+				full_bundle(false, false)
+			),
+			Error::<Test>::ProofBundleMismatch
+		);
+		assert_noop!(
+			transfer_with(
+				anchor,
+				outputs(vec![output(20, 21)]),
+				None,
+				None,
+				full_bundle(true, false)
+			),
+			Error::<Test>::ProofBundleMismatch
+		);
+	});
+}
+
+#[test]
+fn private_transfer_fails_with_receipt_index_past_the_outputs() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		let ptr = PtrAttachment {
+			payment_output_index: 1,
+			ptr_id: fb(0x50),
+		};
+
+		assert_noop!(
+			transfer_with(
+				anchor,
+				outputs(vec![output(20, 21)]),
+				Some(ptr),
+				None,
+				full_bundle(true, false)
+			),
+			Error::<Test>::InvalidOutputIndex
+		);
+	});
+}
+
+#[test]
+fn private_transfer_with_compliance_verifies_circuit_6_against_the_membership_root() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		assert_ok!(NoteTree::add_member(RuntimeOrigin::root(), fb(0x70)));
+		let root = NoteTree::current_root(TreeId::Membership);
+		FakeVerifier::reset();
+
+		assert_ok!(transfer_with(
+			anchor,
+			outputs(vec![output(20, 21)]),
+			None,
+			Some(ComplianceAttachment { output_index: 0 }),
+			full_bundle(false, true)
+		));
+
+		let c6 = FakeVerifier::calls()
+			.into_iter()
+			.find(|c| c.circuit_id == CircuitId::TrustRegistryMembership)
+			.expect("C6 verified");
+		assert_eq!(c6.public_inputs[0][0], root, "membership root");
+		assert_eq!(c6.public_inputs[0][1], fb(20), "cm of output 0");
+		System::assert_has_event(RuntimeEvent::Privacy(Event::ComplianceAttested {
+			bundle_digest: last_digest(),
+			output_index: 0,
+			membership_root: root,
+		}));
+	});
+}
+
+#[test]
+fn private_transfer_fails_when_compliance_proof_rejected_and_writes_nothing() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		FakeVerifier::reject_only(CircuitId::TrustRegistryMembership);
+
+		assert_noop!(
+			transfer_with(
+				anchor,
+				outputs(vec![output(20, 21)]),
+				None,
+				Some(ComplianceAttachment { output_index: 0 }),
+				full_bundle(false, true)
+			),
+			pallet_zk_verifier::Error::<Test>::InvalidProof
+		);
+		assert!(!NullifierRegistry::is_spent(&fb(10)));
+	});
+}
+
+#[test]
+fn circuits_are_verified_in_the_fixed_bundle_order() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		FakeVerifier::reset();
+		let ptr = PtrAttachment {
+			payment_output_index: 0,
+			ptr_id: fb(0x50),
+		};
+
+		assert_ok!(transfer_with(
+			anchor,
+			outputs(vec![output(20, 21)]),
+			Some(ptr),
+			Some(ComplianceAttachment { output_index: 0 }),
+			full_bundle(true, true)
+		));
+
+		let order: Vec<CircuitId> = FakeVerifier::calls().iter().map(|c| c.circuit_id).collect();
+		assert_eq!(
+			order,
+			vec![
+				CircuitId::NullifierDerivation,
+				CircuitId::PrivacyFlagEnforcement,
+				CircuitId::BalanceIntegrity,
+				CircuitId::PtrGeneration,
+				CircuitId::TrustRegistryMembership,
+			]
+		);
 	});
 }

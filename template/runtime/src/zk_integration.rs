@@ -7,16 +7,16 @@
 //! re-targeted to another recipient.
 
 use arxon_zk::{
-	circuits::{C1Circuit, C2Circuit, C3Circuit},
-	merkle::{NoteTree as ReferenceNoteTree, TreeKind},
+	circuits::{C1Circuit, C2Circuit, C3Circuit, C4Circuit, C5Circuit, C6Circuit},
+	merkle::{MemberTree as ReferenceMemberTree, NoteTree as ReferenceNoteTree, TreeKind},
 	primitives::{
 		poseidon::{fp_from_bytes, fp_to_bytes},
 		FieldBytes, Proof, SHIELDED_UNIT,
 	},
 	prove,
 	wallet::{
-		balance_witness, output_witnesses, spend_witnesses, BundleContext, OutputNote, SpendNote,
-		SpendingKey,
+		balance_witness, member_leaf, membership_witness, output_witnesses, spend_witnesses,
+		BundleContext, OutputNote, Receipt, SpendNote, SpendingKey,
 	},
 	Fp,
 };
@@ -25,14 +25,14 @@ use hex_literal::hex;
 use pallet_note_tree::{MerkleTree, TreeId};
 use pallet_privacy::{
 	pallet::{Intent, ValueFlow},
-	Input, Inputs, Output, Outputs, ProofBundle,
+	ComplianceAttachment, Input, Inputs, Output, Outputs, ProofBundle, PtrAttachment,
 };
 use rand_core::OsRng;
 use sp_runtime::BuildStorage;
 
 use crate::{
 	AccountId, Balance, Balances, NoteTree, NullifierRegistry, Privacy, Runtime,
-	RuntimeGenesisConfig, RuntimeOrigin, System,
+	RuntimeGenesisConfig, RuntimeOrigin, System, PTR,
 };
 
 const EXPIRY: u32 = 100;
@@ -64,6 +64,8 @@ fn empty_proofs() -> ProofBundle {
 		spend: None,
 		output: None,
 		balance: BoundedVec::default(),
+		receipt: None,
+		compliance: None,
 	}
 }
 
@@ -89,6 +91,31 @@ fn input_arg(s: &SpendNote) -> Input {
 	}
 }
 
+/// Optional attachments of a bundle: a receipt for one output, a membership proof for one output.
+#[derive(Default)]
+struct Attachments {
+	receipt: Option<(u8, Receipt)>,
+	membership: Option<(
+		u8,
+		arxon_zk::gadgets::merkle::MerklePath<{ arxon_zk::primitives::MEMBER_TREE_DEPTH }>,
+	)>,
+}
+
+impl Attachments {
+	fn ptr(&self) -> Option<PtrAttachment> {
+		self.receipt.as_ref().map(|(i, r)| PtrAttachment {
+			payment_output_index: *i,
+			ptr_id: r.ptr_id_bytes(),
+		})
+	}
+
+	fn compliance(&self) -> Option<ComplianceAttachment> {
+		self.membership
+			.as_ref()
+			.map(|(i, _)| ComplianceAttachment { output_index: *i })
+	}
+}
+
 /// Builds the bundle context the pallet will expect and proves every circuit of it.
 fn prove_bundle(
 	spends: &[SpendNote],
@@ -97,6 +124,24 @@ fn prove_bundle(
 	mask: u8,
 	value: ValueFlow<Runtime>,
 ) -> ProofBundle {
+	prove_bundle_with(
+		spends,
+		outputs,
+		anchor,
+		mask,
+		value,
+		&Attachments::default(),
+	)
+}
+
+fn prove_bundle_with(
+	spends: &[SpendNote],
+	outputs: &[OutputNote],
+	anchor: Option<FieldBytes>,
+	mask: u8,
+	value: ValueFlow<Runtime>,
+	attachments: &Attachments,
+) -> ProofBundle {
 	let intent = Intent::<Runtime> {
 		anchor,
 		inputs: Inputs::truncate_from(spends.iter().map(input_arg).collect()),
@@ -104,6 +149,8 @@ fn prove_bundle(
 		mask_bits: mask,
 		expiry_block: EXPIRY,
 		proofs: empty_proofs(),
+		ptr: attachments.ptr(),
+		compliance: attachments.compliance(),
 		value,
 	};
 	let (transparent_in, transparent_out) = match &intent.value {
@@ -125,10 +172,29 @@ fn prove_bundle(
 		.then(|| proof_of(prove::<C1Circuit>(&output_witnesses(outputs, &ctx), OsRng).unwrap()));
 	let balance =
 		proof_of(prove::<C2Circuit>(&[balance_witness(spends, outputs, &ctx)], OsRng).unwrap());
+	let receipt = attachments
+		.receipt
+		.as_ref()
+		.map(|(_, r)| proof_of(prove::<C4Circuit>(&[r.generation_witness(&ctx)], OsRng).unwrap()));
+	let compliance = attachments.membership.as_ref().map(|(i, path)| {
+		proof_of(
+			prove::<C6Circuit>(
+				&[membership_witness(
+					&outputs[*i as usize],
+					path.clone(),
+					&ctx,
+				)],
+				OsRng,
+			)
+			.unwrap(),
+		)
+	});
 	ProofBundle {
 		spend,
 		output,
 		balance,
+		receipt,
+		compliance,
 	}
 }
 
@@ -203,6 +269,8 @@ fn shield_transfer_and_unshield_with_real_proofs() {
 			outputs_arg(&[to_bob, change]),
 			MASK_ALL_HIDDEN,
 			EXPIRY,
+			None,
+			None,
 			proofs,
 		));
 		reference.insert(to_bob.note.commitment());
@@ -367,5 +435,188 @@ fn runtime_api_reports_the_shielded_pool_state() {
 		assert!(Runtime::circuit_enabled(1));
 		assert!(Runtime::circuit_enabled(3));
 		assert!(!Runtime::circuit_enabled(7));
+	});
+}
+
+#[test]
+fn receipt_attached_to_a_private_payment_can_be_disclosed_to_an_auditor() {
+	dev_ext().execute_with(|| {
+		let mut rng = OsRng;
+		let alice = SpendingKey::random(&mut rng);
+		let bob = SpendingKey::random(&mut rng);
+		let mut reference = ReferenceNoteTree::new(TreeKind::Note);
+		let shielded = OutputNote::new(alice.pk(), 42, &mut rng);
+		let proofs = prove_bundle(
+			&[],
+			&[shielded],
+			None,
+			0,
+			ValueFlow::Shield {
+				depositor: alith(),
+				amount: units(42),
+			},
+		);
+		assert_ok!(Privacy::shield(
+			RuntimeOrigin::signed(alith()),
+			units(42),
+			outputs_arg(&[shielded]),
+			0,
+			EXPIRY,
+			proofs
+		));
+		reference.insert(shielded.note.commitment());
+
+		// Alice pays Bob 40 with a receipt attached to that output, hiding everything.
+		let spend = SpendNote::new(alice, shielded.note, reference.path(0), &mut rng);
+		let to_bob = OutputNote::new(bob.pk(), 40, &mut rng);
+		let change = OutputNote::new(alice.pk(), 2, &mut rng);
+		let receipt = Receipt::new(&alice, to_bob, &mut rng);
+		let attachments = Attachments {
+			receipt: Some((0, receipt)),
+			membership: None,
+		};
+		let anchor = fp_to_bytes(&reference.root());
+		let proofs = prove_bundle_with(
+			std::slice::from_ref(&spend),
+			&[to_bob, change],
+			Some(anchor),
+			MASK_ALL_HIDDEN,
+			ValueFlow::Transfer,
+			&attachments,
+		);
+		assert_ok!(Privacy::submit_private_transfer(
+			RuntimeOrigin::signed(baltathar()),
+			anchor,
+			inputs_arg(std::slice::from_ref(&spend)),
+			outputs_arg(&[to_bob, change]),
+			MASK_ALL_HIDDEN,
+			EXPIRY,
+			attachments.ptr(),
+			None,
+			proofs,
+		));
+		let stored = PTR::receipt(&receipt.ptr_id_bytes()).expect("receipt recorded");
+		assert_eq!(stored.cv, to_bob.cv_bytes());
+		assert_eq!(stored.mask_bits, MASK_ALL_HIDDEN);
+
+		// Alice discloses only the amount to Baltathar, the auditor.
+		let audience = fp_from_bytes(&PTR::audience_of(&baltathar())).unwrap();
+		let disclosure = receipt.disclosure_witness(0b0011, audience, EXPIRY);
+		let proof = proof_of(prove::<C5Circuit>(&[disclosure], OsRng).unwrap());
+		let revealed = pallet_ptr::RevealedValues {
+			sender: fp_to_bytes(&alice.pk()),
+			receiver: fp_to_bytes(&bob.pk()),
+			amount: FieldBytes::from_u64(40),
+		};
+		assert_ok!(PTR::disclose(
+			RuntimeOrigin::signed(baltathar()),
+			receipt.ptr_id_bytes(),
+			0b0011,
+			revealed,
+			EXPIRY,
+			proof.clone()
+		));
+		System::assert_has_event(
+			pallet_ptr::Event::<Runtime>::Disclosed {
+				ptr_id: receipt.ptr_id_bytes(),
+				verifier: baltathar(),
+				disclosure_mask: 0b0011,
+				sender: None,
+				receiver: None,
+				amount: Some(40),
+			}
+			.into(),
+		);
+
+		// The same disclosure proof does not work for another auditor.
+		let replay = PTR::disclose(
+			RuntimeOrigin::signed(alith()),
+			receipt.ptr_id_bytes(),
+			0b0011,
+			revealed,
+			EXPIRY,
+			proof,
+		);
+		assert_eq!(
+			replay,
+			Err(pallet_zk_verifier::Error::<Runtime>::InvalidProof.into())
+		);
+	});
+}
+
+#[test]
+fn payment_to_a_registered_counterparty_carries_a_membership_attestation() {
+	dev_ext().execute_with(|| {
+		let mut rng = OsRng;
+		let alice = SpendingKey::random(&mut rng);
+		let exchange = SpendingKey::random(&mut rng);
+		let mut reference = ReferenceNoteTree::new(TreeKind::Note);
+		let mut registry = ReferenceMemberTree::new(TreeKind::Member);
+
+		// Root registers the exchange's shielded key in the trust registry.
+		let leaf = fp_to_bytes(&member_leaf(exchange.pk()));
+		assert_ok!(NoteTree::add_member(RuntimeOrigin::root(), leaf));
+		let index = registry.insert(member_leaf(exchange.pk()));
+		assert_eq!(
+			fp_from_bytes(&NoteTree::current_root(TreeId::Membership)).unwrap(),
+			registry.root()
+		);
+
+		let shielded = OutputNote::new(alice.pk(), 42, &mut rng);
+		let proofs = prove_bundle(
+			&[],
+			&[shielded],
+			None,
+			0,
+			ValueFlow::Shield {
+				depositor: alith(),
+				amount: units(42),
+			},
+		);
+		assert_ok!(Privacy::shield(
+			RuntimeOrigin::signed(alith()),
+			units(42),
+			outputs_arg(&[shielded]),
+			0,
+			EXPIRY,
+			proofs
+		));
+		reference.insert(shielded.note.commitment());
+
+		let spend = SpendNote::new(alice, shielded.note, reference.path(0), &mut rng);
+		let to_exchange = OutputNote::new(exchange.pk(), 42, &mut rng);
+		let attachments = Attachments {
+			receipt: None,
+			membership: Some((0, registry.path(index))),
+		};
+		let anchor = fp_to_bytes(&reference.root());
+		let proofs = prove_bundle_with(
+			std::slice::from_ref(&spend),
+			&[to_exchange],
+			Some(anchor),
+			MASK_ALL_HIDDEN,
+			ValueFlow::Transfer,
+			&attachments,
+		);
+		assert_ok!(Privacy::submit_private_transfer(
+			RuntimeOrigin::signed(baltathar()),
+			anchor,
+			inputs_arg(std::slice::from_ref(&spend)),
+			outputs_arg(&[to_exchange]),
+			MASK_ALL_HIDDEN,
+			EXPIRY,
+			None,
+			attachments.compliance(),
+			proofs,
+		));
+
+		let attested = System::events().into_iter().any(|r| {
+			matches!(
+				r.event,
+				crate::RuntimeEvent::Privacy(pallet_privacy::Event::ComplianceAttested { output_index: 0, membership_root, .. })
+					if membership_root == NoteTree::current_root(TreeId::Membership)
+			)
+		});
+		assert!(attested, "compliance attestation event emitted");
 	});
 }

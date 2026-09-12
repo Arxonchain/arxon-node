@@ -1,4 +1,6 @@
-use crate::{bundle_digest, encrypted_notes_hash, BundleFields, FieldBytes, CHAIN_ID};
+use crate::{
+	bundle_digest, digest_to_field, encrypted_notes_hash, BundleFields, FieldBytes, CHAIN_ID,
+};
 
 fn fb(byte: u8) -> FieldBytes {
 	FieldBytes([byte; 32])
@@ -162,4 +164,14 @@ fn encrypted_notes_hash_depends_on_order() {
 	let ba = encrypted_notes_hash(&[b"b", b"a"]);
 
 	assert_ne!(ab, ba);
+}
+
+#[test]
+fn digest_to_field_is_canonical_and_injective_on_samples() {
+	let a = digest_to_field(b"alice");
+	let b = digest_to_field(b"bob");
+
+	assert!(a.is_canonical());
+	assert_eq!(a.0[31], 0);
+	assert_ne!(a, b);
 }

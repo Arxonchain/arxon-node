@@ -6,14 +6,14 @@
 //! integration test and a future CLI use to build extrinsics.
 
 use arxon_zk_primitives::poseidon::{
-	fp_to_bytes, hash_cv, hash_nk, hash_note, hash_nullifier, hash_pk,
+	fp_to_bytes, hash_cv, hash_member_leaf, hash_nk, hash_note, hash_nullifier, hash_pk, hash_ptr,
 };
-use arxon_zk_primitives::{FieldBytes, C2_INPUTS, C2_OUTPUTS, NOTE_TREE_DEPTH};
+use arxon_zk_primitives::{FieldBytes, C2_INPUTS, C2_OUTPUTS, MEMBER_TREE_DEPTH, NOTE_TREE_DEPTH};
 use ff::Field;
 use rand_core::RngCore;
 
 use crate::{
-	circuits::{C1Witness, C2Witness, C3Witness},
+	circuits::{C1Witness, C2Witness, C3Witness, C4Witness, C5Witness, C6Witness},
 	field::Fp,
 	gadgets::merkle::MerklePath,
 };
@@ -250,4 +250,93 @@ pub fn is_balanced(spends: &[SpendNote], outputs: &[OutputNote], ctx: &BundleCon
 	let outputs: u128 =
 		outputs.iter().map(|o| o.note.amount as u128).sum::<u128>() + ctx.transparent_out as u128;
 	inputs == outputs
+}
+
+/// A receipt the sender keeps for a payment output: everything Circuit 5 needs later.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Receipt {
+	/// Sender shielded public key.
+	pub pk_s: Fp,
+	/// The paid output.
+	pub payment: OutputNote,
+	/// Receipt nonce.
+	pub nonce: Fp,
+}
+
+impl Receipt {
+	/// A receipt for `payment` from `sender` with a fresh nonce.
+	pub fn new(sender: &SpendingKey, payment: OutputNote, rng: &mut impl RngCore) -> Self {
+		Receipt {
+			pk_s: sender.pk(),
+			payment,
+			nonce: Fp::random(rng),
+		}
+	}
+
+	/// `ptr_id = H_PTR(pk_s, pk_r, cv, nonce)`.
+	pub fn ptr_id(&self) -> Fp {
+		hash_ptr(
+			self.pk_s,
+			self.payment.note.pk,
+			self.payment.cv(),
+			self.nonce,
+		)
+	}
+
+	/// Identifier as bytes.
+	pub fn ptr_id_bytes(&self) -> FieldBytes {
+		fp_to_bytes(&self.ptr_id())
+	}
+
+	/// Circuit 4 witness for the bundle that pays this receipt.
+	pub fn generation_witness(&self, ctx: &BundleContext) -> C4Witness {
+		C4Witness {
+			pk_s: self.pk_s,
+			pk_r: self.payment.note.pk,
+			cv: self.payment.cv(),
+			nonce: self.nonce,
+			bundle_digest: ctx.bundle_digest,
+			expiry_block: ctx.expiry_block,
+		}
+	}
+
+	/// Circuit 5 witness disclosing the fields `disclosure_mask` does not hide to `audience`.
+	pub fn disclosure_witness(
+		&self,
+		disclosure_mask: u8,
+		audience: Fp,
+		expiry_block: u32,
+	) -> C5Witness {
+		C5Witness {
+			pk_s: self.pk_s,
+			pk_r: self.payment.note.pk,
+			amount: self.payment.note.amount,
+			blinding: self.payment.blinding,
+			nonce: self.nonce,
+			disclosure_mask,
+			audience,
+			expiry_block,
+		}
+	}
+}
+
+/// Membership tree leaf of a shielded public key.
+pub fn member_leaf(pk: Fp) -> Fp {
+	hash_member_leaf(pk)
+}
+
+/// Circuit 6 witness: `output` pays the member whose leaf sits at `path` in the registry.
+pub fn membership_witness(
+	output: &OutputNote,
+	path: MerklePath<MEMBER_TREE_DEPTH>,
+	ctx: &BundleContext,
+) -> C6Witness {
+	C6Witness {
+		pk_member: output.note.pk,
+		amount: output.note.amount,
+		rho: output.note.rho,
+		path,
+		bundle_digest: ctx.bundle_digest,
+		expiry_block: ctx.expiry_block,
+	}
 }

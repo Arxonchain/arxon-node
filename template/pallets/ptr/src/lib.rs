@@ -1,290 +1,280 @@
+//! # Private transaction receipts (runtime index 15)
+//!
+//! A receipt is no longer a plaintext record of both parties, the amount and
+//! four balances. It is a commitment `ptr_id = H_PTR(pk_s, pk_r, cv, nonce)`
+//! proved well formed by Circuit 4 when the private transfer that pays it
+//! executes; `pallet-privacy` hands it over through [`pallet_privacy::ReceiptSink`].
+//! Storage keeps the identifier, the payment value commitment, the block and
+//! the bundle mask: nothing a chain observer can read parties or amounts from.
+//!
+//! A receipt holder opens it selectively with [`Pallet::disclose`]: a Circuit 5
+//! proof reveals any subset of sender, receiver and amount, bound to the
+//! *account that submits the disclosure* (`audience`), so a disclosure made for
+//! one auditor cannot be replayed to anyone else. This replaces the single-use
+//! disclosure codes: the holder can produce as many audience-bound proofs as
+//! it wants, off chain, and none of them leaks beyond its audience.
+
 #![cfg_attr(not(feature = "std"), no_std)]
+
 pub use pallet::*;
+pub mod weights;
+
+#[cfg(test)]
+mod mock;
+#[cfg(test)]
+mod tests;
 
 #[frame_support::pallet]
 pub mod pallet {
-    use frame_support::pallet_prelude::*;
-    use frame_system::pallet_prelude::*;
+	use arxon_zk_primitives::{
+		mask::{hides_amount, hides_balance, hides_receiver, hides_sender, is_valid_mask},
+		C5PublicInputs, CircuitId, FieldBytes, InstanceRows, Proof, PublicInputLayout,
+		PublicInputs, RevealedFields,
+	};
+	use frame_support::pallet_prelude::*;
+	use frame_system::pallet_prelude::*;
+	use pallet_privacy::ReceiptSink;
+	use pallet_zk_verifier::VerifyProof;
+	use sp_runtime::traits::SaturatedConversion;
 
-    /// Full details of a private transaction receipt
-    #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
-    pub struct TransactionReceipt<AccountId, Balance, BlockNumber> {
-        /// Unique transaction hash
-        pub tx_hash: [u8; 32],
-        /// Block number when transaction occurred
-        pub block_number: BlockNumber,
-        /// Unix timestamp of the transaction
-        pub timestamp: u64,
-        /// Full sender address
-        pub sender: AccountId,
-        /// Full receiver address
-        pub receiver: AccountId,
-        /// Full amount transferred
-        pub amount: Balance,
-        /// Privacy flags that were active
-        pub hide_sender: bool,
-        pub hide_receiver: bool,
-        pub hide_amount: bool,
-        pub hide_balance: bool,
-        /// Sender balance before transaction (only visible to sender and third party with code)
-        pub sender_balance_before: Balance,
-        /// Sender balance after transaction
-        pub sender_balance_after: Balance,
-        /// Receiver balance before transaction (only visible to receiver and third party with code)
-        pub receiver_balance_before: Balance,
-        /// Receiver balance after transaction
-        pub receiver_balance_after: Balance,
-        /// Receipt is permanently tamper-proof — stored on Arxon blockchain
-        pub tamper_proof_statement: bool,
-    }
+	use super::weights::WeightInfo;
 
-    /// A third party disclosure code — single use, burns after access
-    #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
-    pub struct DisclosureCode<AccountId, BlockNumber> {
-        /// The transaction this code grants access to
-        pub tx_hash: [u8; 32],
-        /// Who generated this code
-        pub generated_by: AccountId,
-        /// Block when code was generated
-        pub generated_at: BlockNumber,
-        /// Whether this code has been used
-        pub used: bool,
-        /// Block when code was used (if used)
-        pub used_at: Option<BlockNumber>,
-    }
+	/// What the chain stores about a receipt.
+	#[derive(
+		Clone,
+		Copy,
+		Encode,
+		Decode,
+		DecodeWithMemTracking,
+		Eq,
+		PartialEq,
+		RuntimeDebug,
+		TypeInfo,
+		MaxEncodedLen
+	)]
+	pub struct ReceiptCommitment<BlockNumber> {
+		/// Value commitment of the payment output the receipt covers.
+		pub cv: FieldBytes,
+		/// Block of the bundle that created it.
+		pub block_number: BlockNumber,
+		/// Four-flag mask of that bundle.
+		pub mask_bits: u8,
+	}
 
-    #[pallet::pallet]
-    #[pallet::without_storage_info]
-    pub struct Pallet<T>(_);
+	/// Values a discloser publishes; ignored (zeroed) where the disclosure mask hides them.
+	#[derive(
+		Clone,
+		Copy,
+		Encode,
+		Decode,
+		DecodeWithMemTracking,
+		Eq,
+		PartialEq,
+		RuntimeDebug,
+		TypeInfo,
+		MaxEncodedLen
+	)]
+	pub struct RevealedValues {
+		/// Sender shielded public key.
+		pub sender: FieldBytes,
+		/// Receiver shielded public key.
+		pub receiver: FieldBytes,
+		/// Amount in shielded units.
+		pub amount: FieldBytes,
+	}
 
-    #[pallet::config]
-    pub trait Config: frame_system::Config<RuntimeEvent: From<Event<Self>>> {
-        type Balance: Member + Parameter + Copy + Default;
-    }
+	#[pallet::pallet]
+	pub struct Pallet<T>(_);
 
-    /// Receipts stored by transaction hash
-    #[pallet::storage]
-    pub type Receipts<T: Config> = StorageMap<_, Blake2_128Concat, [u8; 32], TransactionReceipt<T::AccountId, T::Balance, BlockNumberFor<T>>>;
+	#[pallet::config]
+	pub trait Config: frame_system::Config<RuntimeEvent: From<Event<Self>>> {
+		/// Proof verification.
+		type ZkVerifier: VerifyProof;
+		/// How far ahead a disclosure's expiry block may lie.
+		#[pallet::constant]
+		type MaxProofValidity: Get<BlockNumberFor<Self>>;
+		/// Weights.
+		type WeightInfo: WeightInfo;
+	}
 
-    /// Disclosure codes stored by code hash
-    /// Key: blake2_128(code_bytes) -> DisclosureCode
-    #[pallet::storage]
-    pub type DisclosureCodes<T: Config> = StorageMap<_, Blake2_128Concat, [u8; 16], DisclosureCode<T::AccountId, BlockNumberFor<T>>>;
+	/// Receipts by identifier.
+	#[pallet::storage]
+	pub type Receipts<T: Config> =
+		StorageMap<_, Blake2_128Concat, FieldBytes, ReceiptCommitment<BlockNumberFor<T>>>;
 
-    /// How many disclosure codes have been generated per transaction
-    #[pallet::storage]
-    pub type CodeCountPerTx<T: Config> = StorageMap<_, Blake2_128Concat, [u8; 32], u32, ValueQuery>;
+	/// Disclosures made per receipt.
+	#[pallet::storage]
+	pub type DisclosureCount<T: Config> =
+		StorageMap<_, Blake2_128Concat, FieldBytes, u32, ValueQuery>;
 
-    /// Total receipts ever generated
-    #[pallet::storage]
-    pub type TotalReceipts<T: Config> = StorageValue<_, u64, ValueQuery>;
+	/// Receipts ever recorded.
+	#[pallet::storage]
+	pub type TotalReceipts<T: Config> = StorageValue<_, u64, ValueQuery>;
 
-    /// Total disclosure codes ever used
-    #[pallet::storage]
-    pub type TotalCodesUsed<T: Config> = StorageValue<_, u64, ValueQuery>;
+	#[pallet::event]
+	#[pallet::generate_deposit(pub(super) fn deposit_event)]
+	pub enum Event<T: Config> {
+		/// A private transfer attached a receipt.
+		ReceiptCreated {
+			/// Receipt identifier.
+			ptr_id: FieldBytes,
+			/// Block.
+			block_number: BlockNumberFor<T>,
+			/// Mask of the bundle.
+			mask_bits: u8,
+		},
+		/// A receipt was opened to `verifier`.
+		Disclosed {
+			/// Receipt identifier.
+			ptr_id: FieldBytes,
+			/// Who the disclosure was made to (and who submitted it).
+			verifier: T::AccountId,
+			/// Fields kept hidden.
+			disclosure_mask: u8,
+			/// Sender key if disclosed.
+			sender: Option<FieldBytes>,
+			/// Receiver key if disclosed.
+			receiver: Option<FieldBytes>,
+			/// Amount in shielded units if disclosed.
+			amount: Option<u64>,
+		},
+	}
 
-    #[pallet::event]
-    #[pallet::generate_deposit(pub(super) fn deposit_event)]
-    pub enum Event<T: Config> {
-        /// A private transaction receipt was created
-        ReceiptCreated {
-            tx_hash: [u8; 32],
-            sender: T::AccountId,
-            receiver: T::AccountId,
-            block_number: BlockNumberFor<T>,
-        },
-        /// A disclosure code was generated
-        DisclosureCodeGenerated {
-            tx_hash: [u8; 32],
-            generated_by: T::AccountId,
-            code_index: u32,
-        },
-        /// A disclosure code was used by a third party
-        DisclosureCodeUsed {
-            tx_hash: [u8; 32],
-            used_at: BlockNumberFor<T>,
-        },
-    }
+	#[pallet::error]
+	pub enum Error<T> {
+		/// A receipt with this identifier exists.
+		ReceiptAlreadyExists,
+		/// No receipt with this identifier.
+		ReceiptNotFound,
+		/// Mask has bits above the four flags, or sets the balance bit.
+		InvalidDisclosureMask,
+		/// A field element is not canonical.
+		InvalidFieldElement,
+		/// The expiry block is in the past.
+		ProofExpired,
+		/// The expiry block is further ahead than `MaxProofValidity`.
+		ExpiryTooFar,
+		/// Arithmetic overflow.
+		Overflow,
+	}
 
-    #[pallet::error]
-    pub enum Error<T> {
-        /// Receipt already exists for this transaction
-        ReceiptAlreadyExists,
-        /// Receipt not found
-        ReceiptNotFound,
-        /// Disclosure code not found or invalid
-        InvalidDisclosureCode,
-        /// Disclosure code already used — cannot reuse
-        CodeAlreadyUsed,
-        /// Only sender or receiver can generate disclosure codes
-        NotAPartyToTransaction,
-        /// Arithmetic overflow
-        Overflow,
-    }
+	#[pallet::call]
+	impl<T: Config> Pallet<T> {
+		/// Opens receipt `ptr_id` to the signer, revealing the fields `disclosure_mask` does not hide.
+		#[pallet::call_index(0)]
+		#[pallet::weight(T::WeightInfo::disclose())]
+		pub fn disclose(
+			origin: OriginFor<T>,
+			ptr_id: FieldBytes,
+			disclosure_mask: u8,
+			revealed: RevealedValues,
+			expiry_block: BlockNumberFor<T>,
+			proof: Proof,
+		) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+			ensure!(
+				Receipts::<T>::contains_key(ptr_id),
+				Error::<T>::ReceiptNotFound
+			);
+			ensure!(
+				is_valid_mask(disclosure_mask) && !hides_balance(disclosure_mask),
+				Error::<T>::InvalidDisclosureMask
+			);
+			ensure!(
+				[revealed.sender, revealed.receiver, revealed.amount]
+					.iter()
+					.all(FieldBytes::is_canonical),
+				Error::<T>::InvalidFieldElement
+			);
+			Self::check_expiry(expiry_block)?;
 
-    #[pallet::call]
-    impl<T: Config> Pallet<T> {
-        /// Create a Private Transaction Receipt.
-        /// Called automatically when any privacy flag is active on a transaction.
-        /// Only callable by sudo or the chain itself (internal).
-        #[pallet::call_index(0)]
-        #[pallet::weight(Weight::from_parts(20_000, 0))]
-        pub fn create_receipt(
-            origin: OriginFor<T>,
-            tx_hash: [u8; 32],
-            timestamp: u64,
-            sender: T::AccountId,
-            receiver: T::AccountId,
-            amount: T::Balance,
-            hide_sender: bool,
-            hide_receiver: bool,
-            hide_amount: bool,
-            hide_balance: bool,
-            sender_balance_before: T::Balance,
-            sender_balance_after: T::Balance,
-            receiver_balance_before: T::Balance,
-            receiver_balance_after: T::Balance,
-        ) -> DispatchResult {
-            ensure_root(origin)?;
-            ensure!(!Receipts::<T>::contains_key(&tx_hash), Error::<T>::ReceiptAlreadyExists);
+			let audience = Self::audience_of(&who);
+			let fields = RevealedFields {
+				sender: revealed.sender,
+				receiver: revealed.receiver,
+				amount: revealed.amount,
+			};
+			let instance = C5PublicInputs::new(
+				ptr_id,
+				disclosure_mask,
+				fields,
+				audience,
+				expiry_block.saturated_into(),
+			)
+			.ok_or(Error::<T>::InvalidDisclosureMask)?;
+			let rows =
+				InstanceRows::try_from(instance.to_elements()).map_err(|_| Error::<T>::Overflow)?;
+			let mut inputs = PublicInputs::default();
+			inputs.try_push(rows).map_err(|_| Error::<T>::Overflow)?;
+			T::ZkVerifier::verify_proof(CircuitId::DisclosureProof, &proof, &inputs)?;
 
-            let block_number = frame_system::Pallet::<T>::block_number();
+			DisclosureCount::<T>::try_mutate(ptr_id, |c| -> DispatchResult {
+				*c = c.checked_add(1).ok_or(Error::<T>::Overflow)?;
+				Ok(())
+			})?;
+			Self::deposit_event(Event::Disclosed {
+				ptr_id,
+				verifier: who,
+				disclosure_mask,
+				sender: (!hides_sender(disclosure_mask)).then_some(revealed.sender),
+				receiver: (!hides_receiver(disclosure_mask)).then_some(revealed.receiver),
+				amount: (!hides_amount(disclosure_mask))
+					.then(|| Self::field_to_u64(&revealed.amount)),
+			});
+			Ok(())
+		}
+	}
 
-            let receipt = TransactionReceipt {
-                tx_hash,
-                block_number,
-                timestamp,
-                sender: sender.clone(),
-                receiver: receiver.clone(),
-                amount,
-                hide_sender,
-                hide_receiver,
-                hide_amount,
-                hide_balance,
-                sender_balance_before,
-                sender_balance_after,
-                receiver_balance_before,
-                receiver_balance_after,
-                tamper_proof_statement: true,
-            };
+	impl<T: Config> Pallet<T> {
+		/// The audience field element a disclosure to `who` must be bound to.
+		pub fn audience_of(who: &T::AccountId) -> FieldBytes {
+			arxon_zk_primitives::digest_to_field(&who.encode())
+		}
 
-            Receipts::<T>::insert(&tx_hash, receipt);
+		/// Receipt by identifier.
+		pub fn receipt(ptr_id: &FieldBytes) -> Option<ReceiptCommitment<BlockNumberFor<T>>> {
+			Receipts::<T>::get(ptr_id)
+		}
 
-            let total = TotalReceipts::<T>::get()
-                .checked_add(1)
-                .ok_or(Error::<T>::Overflow)?;
-            TotalReceipts::<T>::put(total);
+		fn check_expiry(expiry_block: BlockNumberFor<T>) -> DispatchResult {
+			let now = frame_system::Pallet::<T>::block_number();
+			ensure!(expiry_block >= now, Error::<T>::ProofExpired);
+			ensure!(
+				expiry_block - now <= T::MaxProofValidity::get(),
+				Error::<T>::ExpiryTooFar
+			);
+			Ok(())
+		}
 
-            Self::deposit_event(Event::ReceiptCreated {
-                tx_hash,
-                sender,
-                receiver,
-                block_number,
-            });
+		fn field_to_u64(f: &FieldBytes) -> u64 {
+			let mut le = [0u8; 8];
+			le.copy_from_slice(&f.0[..8]);
+			u64::from_le_bytes(le)
+		}
+	}
 
-            Ok(())
-        }
-
-        /// Generate a single-use disclosure code for a specific transaction.
-        /// Only the sender or receiver of that transaction can generate codes.
-        /// Each code can only be used once — it burns permanently after use.
-        /// Either party can generate as many codes as they need.
-        #[pallet::call_index(1)]
-        #[pallet::weight(Weight::from_parts(15_000, 0))]
-        pub fn generate_disclosure_code(
-            origin: OriginFor<T>,
-            tx_hash: [u8; 32],
-            code_hash: [u8; 16],
-        ) -> DispatchResult {
-            let who = ensure_signed(origin)?;
-
-            let receipt = Receipts::<T>::get(&tx_hash)
-                .ok_or(Error::<T>::ReceiptNotFound)?;
-
-            ensure!(
-                who == receipt.sender || who == receipt.receiver,
-                Error::<T>::NotAPartyToTransaction
-            );
-
-            let block_number = frame_system::Pallet::<T>::block_number();
-            let code_index = CodeCountPerTx::<T>::get(&tx_hash);
-
-            let disclosure = DisclosureCode {
-                tx_hash,
-                generated_by: who.clone(),
-                generated_at: block_number,
-                used: false,
-                used_at: None,
-            };
-
-            DisclosureCodes::<T>::insert(&code_hash, disclosure);
-            CodeCountPerTx::<T>::insert(&tx_hash, code_index + 1);
-
-            Self::deposit_event(Event::DisclosureCodeGenerated {
-                tx_hash,
-                generated_by: who,
-                code_index,
-            });
-
-            Ok(())
-        }
-
-        /// Use a disclosure code to access full transaction details including both parties balances.
-        /// The code burns permanently after this call — it cannot be reused.
-        /// Third parties call this to verify the transaction.
-        #[pallet::call_index(2)]
-        #[pallet::weight(Weight::from_parts(10_000, 0))]
-        pub fn use_disclosure_code(
-            origin: OriginFor<T>,
-            code_hash: [u8; 16],
-        ) -> DispatchResult {
-            let _who = ensure_signed(origin)?;
-
-            let mut code = DisclosureCodes::<T>::get(&code_hash)
-                .ok_or(Error::<T>::InvalidDisclosureCode)?;
-
-            ensure!(!code.used, Error::<T>::CodeAlreadyUsed);
-
-            let block_number = frame_system::Pallet::<T>::block_number();
-
-            // Burn the code — mark as used permanently
-            code.used = true;
-            code.used_at = Some(block_number);
-            DisclosureCodes::<T>::insert(&code_hash, &code);
-
-            let total = TotalCodesUsed::<T>::get()
-                .checked_add(1)
-                .ok_or(Error::<T>::Overflow)?;
-            TotalCodesUsed::<T>::put(total);
-
-            Self::deposit_event(Event::DisclosureCodeUsed {
-                tx_hash: code.tx_hash,
-                used_at: block_number,
-            });
-
-            Ok(())
-        }
-    }
-
-    impl<T: Config> Pallet<T> {
-        /// Check if a receipt exists for a transaction hash
-        pub fn receipt_exists(tx_hash: &[u8; 32]) -> bool {
-            Receipts::<T>::contains_key(tx_hash)
-        }
-
-        /// Get receipt if it exists
-        pub fn get_receipt(
-            tx_hash: &[u8; 32],
-        ) -> Option<TransactionReceipt<T::AccountId, T::Balance, BlockNumberFor<T>>> {
-            Receipts::<T>::get(tx_hash)
-        }
-
-        /// Check if a disclosure code is valid and unused
-        pub fn is_code_valid(code_hash: &[u8; 16]) -> bool {
-            match DisclosureCodes::<T>::get(code_hash) {
-                Some(code) => !code.used,
-                None => false,
-            }
-        }
-    }
+	impl<T: Config> ReceiptSink for Pallet<T> {
+		fn record(ptr_id: FieldBytes, cv: FieldBytes, mask_bits: u8) -> DispatchResult {
+			ensure!(
+				!Receipts::<T>::contains_key(ptr_id),
+				Error::<T>::ReceiptAlreadyExists
+			);
+			let block_number = frame_system::Pallet::<T>::block_number();
+			Receipts::<T>::insert(
+				ptr_id,
+				ReceiptCommitment {
+					cv,
+					block_number,
+					mask_bits,
+				},
+			);
+			TotalReceipts::<T>::mutate(|t| *t = t.saturating_add(1));
+			Self::deposit_event(Event::ReceiptCreated {
+				ptr_id,
+				block_number,
+				mask_bits,
+			});
+			Ok(())
+		}
+	}
 }

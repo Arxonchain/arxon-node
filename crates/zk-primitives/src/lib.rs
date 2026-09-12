@@ -27,7 +27,7 @@ pub mod proof;
 pub mod public_inputs;
 pub mod vk_hashes;
 
-pub use bundle::{bundle_digest, encrypted_notes_hash, BundleFields};
+pub use bundle::{bundle_digest, digest_to_field, encrypted_notes_hash, BundleFields};
 pub use circuit_id::CircuitId;
 pub use constants::*;
 pub use field_bytes::FieldBytes;

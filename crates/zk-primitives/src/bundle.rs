@@ -71,6 +71,12 @@ pub fn bundle_digest(fields: &BundleFields<'_>) -> FieldBytes {
 	FieldBytes::from_digest(blake2_256(&fields.preimage()))
 }
 
+/// `blake2_256(bytes)` embedded as a canonical field element: the encoding of
+/// runtime-side identities such as a disclosure audience (an account id).
+pub fn digest_to_field(bytes: &[u8]) -> FieldBytes {
+	FieldBytes::from_digest(blake2_256(bytes))
+}
+
 /// Digest of the encrypted note payloads: `blake2_256(SCALE(Vec<Vec<u8>>))`.
 pub fn encrypted_notes_hash(notes: &[&[u8]]) -> [u8; 32] {
 	blake2_256(&notes.encode())

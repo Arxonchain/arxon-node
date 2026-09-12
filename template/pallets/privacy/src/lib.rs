@@ -188,6 +188,48 @@ pub struct ProofBundle {
 	pub output: Option<arxon_zk_primitives::Proof>,
 	/// Circuit 2, always present.
 	pub balance: arxon_zk_primitives::Proof,
+	/// Circuit 4. `Some` iff a receipt is attached.
+	pub receipt: Option<arxon_zk_primitives::Proof>,
+	/// Circuit 6. `Some` iff a compliance attestation is attached.
+	pub compliance: Option<arxon_zk_primitives::Proof>,
+}
+
+/// A private transaction receipt attached to one output of the bundle.
+#[derive(
+	Clone,
+	Copy,
+	Encode,
+	Decode,
+	DecodeWithMemTracking,
+	Eq,
+	PartialEq,
+	RuntimeDebug,
+	TypeInfo,
+	MaxEncodedLen
+)]
+pub struct PtrAttachment {
+	/// Which output is the payment the receipt covers.
+	pub payment_output_index: u8,
+	/// `H_PTR(pk_s, pk_r, cv, nonce)`, proved by Circuit 4.
+	pub ptr_id: FieldBytes,
+}
+
+/// A proof that one output pays a regulated counterparty of the trust registry.
+#[derive(
+	Clone,
+	Copy,
+	Encode,
+	Decode,
+	DecodeWithMemTracking,
+	Eq,
+	PartialEq,
+	RuntimeDebug,
+	TypeInfo,
+	MaxEncodedLen
+)]
+pub struct ComplianceAttachment {
+	/// Which output is paid to the registry member.
+	pub output_index: u8,
 }
 
 /// Spent and created notes of a bundle.
@@ -205,9 +247,9 @@ pub mod pallet {
 		bundle_digest, encrypted_notes_hash,
 		mask::{hides_amount, hides_receiver, hides_sender, is_valid_mask},
 		poseidon::cv_dummy_bytes,
-		BundleFields, C1PublicInputs, C2PublicInputs, C3PublicInputs, CircuitId, FieldBytes,
-		InstanceRows, PublicInputLayout, PublicInputs, RevealedFields, C2_INPUTS, C2_OUTPUTS,
-		CHAIN_ID,
+		BundleFields, C1PublicInputs, C2PublicInputs, C3PublicInputs, C4PublicInputs,
+		C6PublicInputs, CircuitId, FieldBytes, InstanceRows, PublicInputLayout, PublicInputs,
+		RevealedFields, C2_INPUTS, C2_OUTPUTS, CHAIN_ID,
 	};
 	use frame_support::{
 		pallet_prelude::*,
@@ -223,7 +265,10 @@ pub mod pallet {
 	use pallet_zk_verifier::VerifyProof;
 	use sp_runtime::traits::{AccountIdConversion, SaturatedConversion, Zero};
 
-	use super::{weights::WeightInfo, Inputs, Outputs, PrivacyMask, ProofBundle, ReceiptSink};
+	use super::{
+		weights::WeightInfo, ComplianceAttachment, Inputs, Outputs, PrivacyMask, ProofBundle,
+		PtrAttachment, ReceiptSink,
+	};
 
 	/// Balance type of the configured currency.
 	pub type BalanceOf<T> =
@@ -335,6 +380,15 @@ pub mod pallet {
 			/// Expiry block the proofs were bound to.
 			expiry_block: BlockNumberFor<T>,
 		},
+		/// One output was proven to pay a trust registry member.
+		ComplianceAttested {
+			/// Bundle digest.
+			bundle_digest: FieldBytes,
+			/// Output index.
+			output_index: u8,
+			/// Membership root the proof opened to.
+			membership_root: FieldBytes,
+		},
 		/// A note was spent.
 		NoteSpent {
 			/// Bundle digest.
@@ -403,6 +457,8 @@ pub mod pallet {
 		ShieldedKeyTaken,
 		/// A bundle with this exact digest already executed.
 		DuplicateBundle,
+		/// A receipt or compliance attachment points past the outputs.
+		InvalidOutputIndex,
 	}
 
 	#[pallet::call]
@@ -467,6 +523,8 @@ pub mod pallet {
 				mask_bits,
 				expiry_block,
 				proofs,
+				ptr: None,
+				compliance: None,
 				value: ValueFlow::Shield { depositor, amount },
 			};
 			Self::execute(intent)
@@ -494,12 +552,15 @@ pub mod pallet {
 				mask_bits,
 				expiry_block,
 				proofs,
+				ptr: None,
+				compliance: None,
 				value: ValueFlow::Unshield { recipient, amount },
 			};
 			Self::execute(intent)
 		}
 
-		/// Spends notes and creates notes inside the pool.
+		/// Spends notes and creates notes inside the pool, optionally attaching a
+		/// receipt (Circuit 4) and a trust registry attestation (Circuit 6).
 		#[pallet::call_index(6)]
 		#[pallet::weight(T::WeightInfo::submit_private_transfer(inputs.len() as u32, outputs.len() as u32))]
 		pub fn submit_private_transfer(
@@ -509,6 +570,8 @@ pub mod pallet {
 			outputs: Outputs,
 			mask_bits: u8,
 			expiry_block: BlockNumberFor<T>,
+			ptr: Option<PtrAttachment>,
+			compliance: Option<ComplianceAttachment>,
 			proofs: ProofBundle,
 		) -> DispatchResult {
 			ensure_signed(origin)?;
@@ -519,6 +582,8 @@ pub mod pallet {
 				mask_bits,
 				expiry_block,
 				proofs,
+				ptr,
+				compliance,
 				value: ValueFlow::Transfer,
 			};
 			Self::execute(intent)
@@ -559,6 +624,10 @@ pub mod pallet {
 		pub expiry_block: BlockNumberFor<T>,
 		/// Proofs.
 		pub proofs: ProofBundle,
+		/// Receipt attachment.
+		pub ptr: Option<PtrAttachment>,
+		/// Trust registry attestation.
+		pub compliance: Option<ComplianceAttachment>,
 		/// Transparent value flow.
 		pub value: ValueFlow<T>,
 	}
@@ -661,6 +730,27 @@ pub mod pallet {
 				Error::<T>::ProofBundleMismatch
 			);
 			ensure!(has_anchor == has_inputs, Error::<T>::ProofBundleMismatch);
+			ensure!(
+				intent.proofs.receipt.is_some() == intent.ptr.is_some(),
+				Error::<T>::ProofBundleMismatch
+			);
+			ensure!(
+				intent.proofs.compliance.is_some() == intent.compliance.is_some(),
+				Error::<T>::ProofBundleMismatch
+			);
+			if let Some(ptr) = &intent.ptr {
+				ensure!(
+					(ptr.payment_output_index as usize) < intent.outputs.len(),
+					Error::<T>::InvalidOutputIndex
+				);
+				ensure!(ptr.ptr_id.is_canonical(), Error::<T>::InvalidFieldElement);
+			}
+			if let Some(c) = &intent.compliance {
+				ensure!(
+					(c.output_index as usize) < intent.outputs.len(),
+					Error::<T>::InvalidOutputIndex
+				);
+			}
 			Ok(())
 		}
 
@@ -841,7 +931,27 @@ pub mod pallet {
 				CircuitId::BalanceIntegrity,
 				&intent.proofs.balance,
 				&Self::instances([balance].into_iter())?,
-			)
+			)?;
+			if let (Some(ptr), Some(proof)) = (&intent.ptr, &intent.proofs.receipt) {
+				let payment = &intent.outputs[ptr.payment_output_index as usize];
+				let receipt = C4PublicInputs::new(ptr.ptr_id, payment.cv, digest, expiry);
+				T::ZkVerifier::verify_proof(
+					CircuitId::PtrGeneration,
+					proof,
+					&Self::instances([receipt].into_iter())?,
+				)?;
+			}
+			if let (Some(c), Some(proof)) = (&intent.compliance, &intent.proofs.compliance) {
+				let paid = &intent.outputs[c.output_index as usize];
+				let root = T::Trees::current_root(TreeId::Membership);
+				let membership = C6PublicInputs::new(root, paid.cm, digest, expiry);
+				T::ZkVerifier::verify_proof(
+					CircuitId::TrustRegistryMembership,
+					proof,
+					&Self::instances([membership].into_iter())?,
+				)?;
+			}
+			Ok(())
 		}
 
 		/// Runs a bundle: every check, then every write.
@@ -924,6 +1034,17 @@ pub mod pallet {
 					});
 				}
 				ValueFlow::Transfer => {}
+			}
+			if let Some(ptr) = &intent.ptr {
+				let payment = &intent.outputs[ptr.payment_output_index as usize];
+				T::Receipts::record(ptr.ptr_id, payment.cv, intent.mask_bits)?;
+			}
+			if let Some(c) = &intent.compliance {
+				Self::deposit_event(Event::ComplianceAttested {
+					bundle_digest: digest,
+					output_index: c.output_index,
+					membership_root: T::Trees::current_root(TreeId::Membership),
+				});
 			}
 			if mask.is_any_private() {
 				let count = ShieldedTxCount::<T>::get()

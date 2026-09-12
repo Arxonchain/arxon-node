@@ -13,7 +13,7 @@ use frame_system::EnsureRoot;
 use pallet_zk_verifier::ProofVerifier;
 use sp_runtime::BuildStorage;
 
-use crate as pallet_privacy;
+use crate::{self as pallet_privacy, ReceiptSink};
 
 pub type Balance = u128;
 pub type AccountId = u64;
@@ -120,6 +120,38 @@ parameter_types! {
 pub const UNIT: Balance = 1_000_000_000;
 pub const MAX_VALIDITY: u64 = 128;
 
+thread_local! {
+	static RECEIPTS: RefCell<Vec<(arxon_zk_primitives::FieldBytes, arxon_zk_primitives::FieldBytes, u8)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Records every receipt handed over by the privacy pallet.
+pub struct RecordingSink;
+
+impl RecordingSink {
+	pub fn recorded() -> Vec<(
+		arxon_zk_primitives::FieldBytes,
+		arxon_zk_primitives::FieldBytes,
+		u8,
+	)> {
+		RECEIPTS.with(|r| r.borrow().clone())
+	}
+
+	pub fn reset() {
+		RECEIPTS.with(|r| r.borrow_mut().clear());
+	}
+}
+
+impl ReceiptSink for RecordingSink {
+	fn record(
+		ptr_id: arxon_zk_primitives::FieldBytes,
+		cv: arxon_zk_primitives::FieldBytes,
+		mask_bits: u8,
+	) -> frame_support::dispatch::DispatchResult {
+		RECEIPTS.with(|r| r.borrow_mut().push((ptr_id, cv, mask_bits)));
+		Ok(())
+	}
+}
+
 impl pallet_privacy::Config for Test {
 	type Currency = Balances;
 	type PalletId = PrivacyPalletId;
@@ -128,7 +160,7 @@ impl pallet_privacy::Config for Test {
 	type ZkVerifier = ZkVerifier;
 	type Nullifiers = NullifierRegistry;
 	type Trees = NoteTree;
-	type Receipts = ();
+	type Receipts = RecordingSink;
 	type WeightInfo = ();
 }
 
@@ -140,6 +172,7 @@ pub const ALICE_BALANCE: Balance = 1_000 * UNIT;
 /// Externalities at block 1: Alice funded, every circuit enabled, fake verifier accepting.
 pub fn new_test_ext() -> sp_io::TestExternalities {
 	FakeVerifier::reset();
+	RecordingSink::reset();
 	let genesis = RuntimeGenesisConfig {
 		system: Default::default(),
 		balances: pallet_balances::GenesisConfig {

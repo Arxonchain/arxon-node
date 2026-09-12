@@ -132,3 +132,38 @@ fn spend_cv_bytes_and_c3_public_cv_agree() {
 		spend.nullifier_bytes()
 	);
 }
+
+#[test]
+fn receipt_witnesses_satisfy_circuits_4_and_5_and_agree_on_ptr_id() {
+	let mut rng = deterministic_rng(8);
+	let alice = SpendingKey::random(&mut rng);
+	let bob = SpendingKey::random(&mut rng);
+	let payment = OutputNote::new(bob.pk(), 40, &mut rng);
+	let receipt = Receipt::new(&alice, payment, &mut rng);
+	let ctx = ctx(0, 0, 0);
+
+	let c4 = receipt.generation_witness(&ctx);
+	let c5 = receipt.disclosure_witness(0b0011, Fp::from(99), 60);
+
+	assert_satisfied(&mock_honest::<crate::circuits::C4Circuit>(&c4));
+	assert_satisfied(&mock_honest::<crate::circuits::C5Circuit>(&c5));
+	assert_eq!(c4.ptr_id(), c5.ptr_id());
+	assert_eq!(c4.ptr_id(), receipt.ptr_id());
+	assert_eq!(c4.cv, payment.cv());
+}
+
+#[test]
+fn membership_witness_satisfies_circuit_6() {
+	let mut rng = deterministic_rng(9);
+	let member = SpendingKey::random(&mut rng);
+	let mut registry = crate::merkle::MemberTree::new(TreeKind::Member);
+	let index = registry.insert(member_leaf(member.pk()));
+	let paid = OutputNote::new(member.pk(), 5, &mut rng);
+	let ctx = ctx(0, 0, 0);
+
+	let c6 = membership_witness(&paid, registry.path(index), &ctx);
+
+	assert_eq!(c6.registry_root(), registry.root());
+	assert_eq!(c6.cm(), paid.note.commitment());
+	assert_satisfied(&mock_honest::<crate::circuits::C6Circuit>(&c6));
+}

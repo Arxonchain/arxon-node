@@ -12,6 +12,9 @@ mod genesis_config_preset;
 mod precompiles;
 mod weights;
 
+#[cfg(test)]
+mod zk_integration;
+
 // Make the WASM binary available.
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
@@ -1171,9 +1174,7 @@ mod tests {
 	}
 }
 
-impl pallet_mining::Config for Runtime {
-    type RuntimeEvent = RuntimeEvent;
-}
+impl pallet_mining::Config for Runtime {}
 
 parameter_types! {
 	pub const PrivacyPalletId: frame_support::PalletId = frame_support::PalletId(*b"arx/shld");
@@ -1195,31 +1196,27 @@ impl pallet_privacy::Config for Runtime {
 }
 
 impl pallet_arx_claim::Config for Runtime {
-    type RuntimeEvent = RuntimeEvent;
-    type Currency = Balances;
-    type WeightInfo = ();
+	type Currency = Balances;
+	type WeightInfo = ();
 }
 
 impl pallet_ptr::Config for Runtime {
-    type RuntimeEvent = RuntimeEvent;
-    type Balance = Balance;
+	type Balance = Balance;
 }
 
 impl pallet_trust_registry::Config for Runtime {
-    type RuntimeEvent = RuntimeEvent;
-    // Bronze: ~3 months at 6s blocks (90 days * 86400s / 6s)
-    type BronzeMinLockBlocks = ConstU32<1296000>;
-    // Silver: ~6 months
-    type SilverMinLockBlocks = ConstU32<2592000>;
-    // Gold: ~12 months
-    type GoldMinLockBlocks = ConstU32<5184000>;
-    // 100 unique alerts to auto-flag
-    type AlertThreshold = ConstU32<100>;
+	// Bronze: ~3 months at 6s blocks (90 days * 86400s / 6s)
+	type BronzeMinLockBlocks = ConstU32<1296000>;
+	// Silver: ~6 months
+	type SilverMinLockBlocks = ConstU32<2592000>;
+	// Gold: ~12 months
+	type GoldMinLockBlocks = ConstU32<5184000>;
+	// 100 unique alerts to auto-flag
+	type AlertThreshold = ConstU32<100>;
 }
 
 impl pallet_quantum_account::Config for Runtime {
-    type RuntimeEvent = RuntimeEvent;
-    type RuntimeCall = RuntimeCall;
+	type RuntimeCall = RuntimeCall;
 }
 
 impl pallet_zk_verifier::Config for Runtime {

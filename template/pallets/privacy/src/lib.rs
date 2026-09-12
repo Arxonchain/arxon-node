@@ -725,6 +725,13 @@ pub mod pallet {
 			Self::transparent(intent).expect("valid amounts")
 		}
 
+		/// The bundle digest a wallet must put into every proof of `intent`.
+		/// Same computation `execute` performs; exposed so provers and RPCs agree with the pallet.
+		pub fn bundle_digest_for(intent: &Intent<T>) -> Result<FieldBytes, DispatchError> {
+			let transparent = Self::transparent(intent)?;
+			Ok(Self::digest_of(intent, &transparent))
+		}
+
 		/// The digest every proof of the bundle must carry.
 		pub fn digest_of(intent: &Intent<T>, transparent: &Transparent) -> FieldBytes {
 			let recipient = match &intent.value {

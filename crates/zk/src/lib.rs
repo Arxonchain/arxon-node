@@ -26,6 +26,7 @@ pub mod params;
 pub mod pins;
 pub mod prover;
 pub mod verifier;
+pub mod wallet;
 
 #[cfg(test)]
 pub(crate) mod test_support;

@@ -7,8 +7,7 @@ pub mod pallet {
     #[pallet::pallet]
     pub struct Pallet<T>(_);
     #[pallet::config]
-    pub trait Config: frame_system::Config {
-        type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
+    pub trait Config: frame_system::Config<RuntimeEvent: From<Event<Self>>> {
     }
     #[pallet::storage]
     pub type MiningPoints<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, u64, ValueQuery>;

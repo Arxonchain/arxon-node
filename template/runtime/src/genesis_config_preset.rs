@@ -20,15 +20,30 @@ pub fn development() -> serde_json::Value {
 		// Genesis accounts with real ARX allocations
 		vec![
 			// Treasury: 30% = 300M ARX
-			(AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), 300_000_000 * ARX_UNIT),
+			(
+				AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
+				300_000_000 * ARX_UNIT,
+			),
 			// Mining Pool: 25% = 250M ARX
-			(AccountId::from(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")), 250_000_000 * ARX_UNIT),
+			(
+				AccountId::from(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")),
+				250_000_000 * ARX_UNIT,
+			),
 			// Investors: 20% = 200M ARX
-			(AccountId::from(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")), 200_000_000 * ARX_UNIT),
+			(
+				AccountId::from(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")),
+				200_000_000 * ARX_UNIT,
+			),
 			// Team: 15% = 150M ARX
-			(AccountId::from(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")), 150_000_000 * ARX_UNIT),
+			(
+				AccountId::from(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")),
+				150_000_000 * ARX_UNIT,
+			),
 			// Staking: 10% = 100M ARX
-			(AccountId::from(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")), 100_000_000 * ARX_UNIT),
+			(
+				AccountId::from(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")),
+				100_000_000 * ARX_UNIT,
+			),
 		],
 		vec![],
 		ARXON_EVM_CHAIN_ID,
@@ -89,10 +104,7 @@ fn testnet_genesis(
 		base_fee: Default::default(),
 		grandpa: Default::default(),
 		balances: BalancesConfig {
-			balances: endowed_accounts
-				.iter()
-				.cloned()
-				.collect(),
+			balances: endowed_accounts.iter().cloned().collect(),
 			..Default::default()
 		},
 		ethereum: EthereumConfig {

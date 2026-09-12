@@ -1,8 +1,8 @@
 use core::marker::PhantomData;
-use fp_evm::{ExitRevert, PrecompileFailure};
 use pallet_evm::{
 	IsPrecompileResult, Precompile, PrecompileHandle, PrecompileResult, PrecompileSet,
 };
+use pallet_evm_precompile_arxon_zk::ArxonZkPrecompile;
 use sp_core::H160;
 
 use pallet_evm_precompile_curve25519 as curve25519_precompile;
@@ -10,8 +10,9 @@ use pallet_evm_precompile_modexp::Modexp;
 use pallet_evm_precompile_sha3fips::Sha3FIPS256;
 use pallet_evm_precompile_simple::{ECRecover, ECRecoverPublicKey, Identity, Ripemd160, Sha256};
 
-/// Halo2 privacy verifier (Circuit 1+). Stub until ZK lands so nothing can deploy here.
-pub const ARXON_ZK_PRECOMPILE: u64 = 0x800;
+/// Arxon ZK precompile: view-only access to the Halo2 verifier, the nullifier set
+/// and the shielded pool tree roots (`pallet-evm-precompile-arxon-zk`).
+pub const ARXON_ZK_PRECOMPILE: u64 = pallet_evm_precompile_arxon_zk::ADDRESS;
 
 pub struct FrontierPrecompiles<R>(PhantomData<R>);
 
@@ -39,7 +40,11 @@ where
 }
 impl<R> PrecompileSet for FrontierPrecompiles<R>
 where
-	R: pallet_evm::Config + frame_system::Config,
+	R: pallet_evm::Config
+		+ frame_system::Config
+		+ pallet_zk_verifier::Config
+		+ pallet_nullifier_registry::Config
+		+ pallet_note_tree::Config,
 {
 	fn execute(&self, handle: &mut impl PrecompileHandle) -> Option<PrecompileResult> {
 		match handle.code_address() {
@@ -64,7 +69,8 @@ where
 				R,
 				crate::weights::pallet_evm_precompile_curve25519::WeightInfo<R>,
 			>::execute(handle)),
-			a if a == hash(ARXON_ZK_PRECOMPILE) => Some(reserved_zk_precompile(handle)),
+			// Arxon ZK (view only; the submission path is a separate precompile).
+			a if a == hash(ARXON_ZK_PRECOMPILE) => Some(ArxonZkPrecompile::<R>::execute(handle)),
 			_ => None,
 		}
 	}
@@ -79,12 +85,4 @@ where
 
 fn hash(a: u64) -> H160 {
 	H160::from_low_u64_be(a)
-}
-
-fn reserved_zk_precompile(handle: &mut impl PrecompileHandle) -> PrecompileResult {
-	handle.record_cost(100)?;
-	Err(PrecompileFailure::Revert {
-		exit_status: ExitRevert::Reverted,
-		output: b"ARXON_ZK_PRECOMPILE_RESERVED".to_vec(),
-	})
 }

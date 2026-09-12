@@ -237,6 +237,28 @@ fn verify_proof_fails_with_overflow_when_count_is_saturated() {
 }
 
 #[test]
+fn check_proof_verifies_without_counting() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(ZkVerifier::check_proof(c1(), &proof(), &inputs(c1(), 1)));
+
+		assert_eq!(VerificationCount::<Test>::get(), 0);
+		assert!(FakeVerifier::last_call().is_some(), "backend was consulted");
+	});
+}
+
+#[test]
+fn check_proof_rejects_like_verify_proof() {
+	new_test_ext().execute_with(|| {
+		FakeVerifier::set_accept(false);
+
+		assert_noop!(
+			ZkVerifier::check_proof(c1(), &proof(), &inputs(c1(), 1)),
+			Error::<Test>::InvalidProof
+		);
+	});
+}
+
+#[test]
 fn verify_weight_grows_with_instances() {
 	new_test_ext().execute_with(|| {
 		let one = ZkVerifier::verify_weight(c1(), 1);

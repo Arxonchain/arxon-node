@@ -68,8 +68,15 @@ impl ProofVerifier for AlwaysReject {
 
 /// Proof verification as seen by the consuming pallets.
 pub trait VerifyProof {
-	/// Verifies one proof (one or more instances) of `circuit_id`.
+	/// Verifies one proof (one or more instances) of `circuit_id` and counts it.
 	fn verify_proof(
+		circuit_id: CircuitId,
+		proof: &Proof,
+		public_inputs: &PublicInputs,
+	) -> DispatchResult;
+
+	/// Same checks as [`Self::verify_proof`] without writing anything (for `view` callers).
+	fn check_proof(
 		circuit_id: CircuitId,
 		proof: &Proof,
 		public_inputs: &PublicInputs,
@@ -252,6 +259,19 @@ pub mod pallet {
 			proof: &Proof,
 			public_inputs: &PublicInputs,
 		) -> DispatchResult {
+			Self::check_proof(circuit_id, proof, public_inputs)?;
+			let count = VerificationCount::<T>::get()
+				.checked_add(1)
+				.ok_or(Error::<T>::Overflow)?;
+			VerificationCount::<T>::put(count);
+			Ok(())
+		}
+
+		fn check_proof(
+			circuit_id: CircuitId,
+			proof: &Proof,
+			public_inputs: &PublicInputs,
+		) -> DispatchResult {
 			let config = Circuits::<T>::get(circuit_id).ok_or(Error::<T>::CircuitNotRegistered)?;
 			ensure!(config.enabled, Error::<T>::CircuitDisabled);
 			Self::check_shape(circuit_id, public_inputs)?;
@@ -259,10 +279,6 @@ pub mod pallet {
 				T::Verifier::verify(circuit_id, &config.vk_hash, proof.as_slice(), public_inputs),
 				Error::<T>::InvalidProof
 			);
-			let count = VerificationCount::<T>::get()
-				.checked_add(1)
-				.ok_or(Error::<T>::Overflow)?;
-			VerificationCount::<T>::put(count);
 			Ok(())
 		}
 	}

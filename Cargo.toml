@@ -57,6 +57,7 @@ members = [
 	"template/pallets/zk-verifier",
 	"template/primitives/zk-host",
 	"template/primitives/zk-runtime-api",
+	"template/precompiles/zk",
 ]
 resolver = "2"
 

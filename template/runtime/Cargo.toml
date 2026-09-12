@@ -61,6 +61,7 @@ pallet-dynamic-fee = { workspace = true }
 pallet-ethereum = { workspace = true }
 pallet-evm = { workspace = true }
 pallet-evm-chain-id = { workspace = true }
+pallet-evm-precompile-arxon-zk = { workspace = true }
 pallet-evm-precompile-curve25519 = { workspace = true }
 pallet-evm-precompile-curve25519-benchmarking = { workspace = true }
 pallet-evm-precompile-modexp = { workspace = true }
@@ -141,6 +142,7 @@ std = [
 	"pallet-ethereum/std",
 	"pallet-evm/std",
 	"pallet-evm-chain-id/std",
+	"pallet-evm-precompile-arxon-zk/std",
 	"pallet-evm-precompile-modexp/std",
 	"pallet-evm-precompile-sha3fips/std",
 	"pallet-evm-precompile-sha3fips-benchmarking/std",
@@ -183,6 +185,7 @@ runtime-benchmarks = [
 	"pallet-ptr/runtime-benchmarks",
 	"pallet-trust-registry/runtime-benchmarks",
 	"pallet-quantum-account/runtime-benchmarks",
+	"pallet-evm-precompile-arxon-zk/runtime-benchmarks",
 	"pallet-note-tree/runtime-benchmarks",
 	"pallet-nullifier-registry/runtime-benchmarks",
 	"pallet-zk-verifier/runtime-benchmarks",

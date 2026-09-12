@@ -1,0 +1,66 @@
+[package]
+name = "pallet-evm-precompile-arxon-zk"
+version = "0.1.0"
+license = "Unlicense"
+description = "Arxon EVM precompile 0x800: view-only access to the Halo2 verifier, the nullifier set and the shielded pool tree roots."
+authors = { workspace = true }
+edition = { workspace = true }
+repository = { workspace = true }
+publish = false
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+arxon-zk-primitives = { workspace = true }
+fp-evm = { workspace = true }
+frame-support = { workspace = true }
+frame-system = { workspace = true }
+pallet-evm = { workspace = true }
+pallet-note-tree = { workspace = true }
+pallet-nullifier-registry = { workspace = true }
+pallet-zk-verifier = { workspace = true }
+precompile-utils = { workspace = true }
+scale-codec = { workspace = true }
+sp-core = { workspace = true }
+sp-runtime = { workspace = true }
+
+[dev-dependencies]
+pallet-balances = { workspace = true, features = ["default", "insecure_zero_ed"] }
+pallet-timestamp = { workspace = true, features = ["default"] }
+precompile-utils = { workspace = true, features = ["testing"] }
+scale-info = { workspace = true, features = ["default"] }
+sp-io = { workspace = true, features = ["default"] }
+
+[features]
+default = ["std"]
+std = [
+	"arxon-zk-primitives/std",
+	"fp-evm/std",
+	"frame-support/std",
+	"frame-system/std",
+	"pallet-evm/std",
+	"pallet-note-tree/std",
+	"pallet-nullifier-registry/std",
+	"pallet-zk-verifier/std",
+	"precompile-utils/std",
+	"scale-codec/std",
+	"sp-core/std",
+	"sp-runtime/std",
+]
+runtime-benchmarks = [
+	"frame-support/runtime-benchmarks",
+	"frame-system/runtime-benchmarks",
+	"pallet-evm/runtime-benchmarks",
+	"pallet-note-tree/runtime-benchmarks",
+	"pallet-nullifier-registry/runtime-benchmarks",
+	"pallet-zk-verifier/runtime-benchmarks",
+]
+try-runtime = [
+	"frame-support/try-runtime",
+	"frame-system/try-runtime",
+	"pallet-evm/try-runtime",
+	"pallet-note-tree/try-runtime",
+	"pallet-nullifier-registry/try-runtime",
+	"pallet-zk-verifier/try-runtime",
+]

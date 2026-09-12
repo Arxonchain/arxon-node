@@ -52,6 +52,7 @@ members = [
 	"template/fuzz",
 	"crates/zk-primitives",
 	"crates/zk",
+	"template/pallets/nullifier-registry",
 ]
 resolver = "2"
 

@@ -9,6 +9,9 @@ pub mod c0_dummy;
 pub mod c1_privacy_flags;
 pub mod c2_balance;
 pub mod c3_nullifier;
+pub mod c4_ptr;
+pub mod c5_disclosure;
+pub mod c6_membership;
 pub mod common;
 
 use arxon_zk_primitives::CircuitId;
@@ -16,13 +19,12 @@ use arxon_zk_primitives::CircuitId;
 pub use c1_privacy_flags::{C1Circuit, C1Public, C1Witness};
 pub use c2_balance::{C2Circuit, C2Public, C2Witness};
 pub use c3_nullifier::{C3Circuit, C3Public, C3Witness};
+pub use c4_ptr::{C4Circuit, C4Public, C4Witness};
+pub use c5_disclosure::{C5Circuit, C5Public, C5Witness};
+pub use c6_membership::{C6Circuit, C6Public, C6Witness};
 
-/// Chain circuits implemented so far (plan Phase F adds 4, 5 and 6).
-pub const WIRED: &[CircuitId] = &[
-	CircuitId::PrivacyFlagEnforcement,
-	CircuitId::BalanceIntegrity,
-	CircuitId::NullifierDerivation,
-];
+/// Every chain circuit is implemented.
+pub const WIRED: &[CircuitId] = &CircuitId::ALL;
 
 /// Runs `$body` once per wired chain circuit type, binding it to `$c`.
 #[macro_export]
@@ -38,6 +40,18 @@ macro_rules! for_each_chain_circuit {
 		}
 		{
 			type $c = $crate::circuits::C3Circuit;
+			$body
+		}
+		{
+			type $c = $crate::circuits::C4Circuit;
+			$body
+		}
+		{
+			type $c = $crate::circuits::C5Circuit;
+			$body
+		}
+		{
+			type $c = $crate::circuits::C6Circuit;
 			$body
 		}
 	}};
@@ -62,7 +76,18 @@ macro_rules! dispatch_chain_circuit {
 				type $c = $crate::circuits::C3Circuit;
 				$body
 			}
-			_ => Err($crate::error::VerifyError::UnknownCircuit(id.as_u8())),
+			::arxon_zk_primitives::CircuitId::PtrGeneration => {
+				type $c = $crate::circuits::C4Circuit;
+				$body
+			}
+			::arxon_zk_primitives::CircuitId::DisclosureProof => {
+				type $c = $crate::circuits::C5Circuit;
+				$body
+			}
+			::arxon_zk_primitives::CircuitId::TrustRegistryMembership => {
+				type $c = $crate::circuits::C6Circuit;
+				$body
+			}
 		}
 	}};
 }
@@ -123,5 +148,10 @@ mod tests {
 		crate::key_cache::warm_up();
 
 		assert!(crate::key_cache::cached_count() >= WIRED.len());
+	}
+
+	#[test]
+	fn all_six_circuits_are_wired() {
+		assert_eq!(WIRED, &CircuitId::ALL);
 	}
 }

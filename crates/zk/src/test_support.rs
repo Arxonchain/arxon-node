@@ -143,9 +143,9 @@ pub mod fixtures {
 	use ff::Field;
 
 	use crate::{
-		circuits::{C1Witness, C2Witness, C3Witness},
+		circuits::{C1Witness, C2Witness, C3Witness, C4Witness, C5Witness, C6Witness},
 		field::Fp,
-		merkle::{NoteTree, TreeKind},
+		merkle::{MemberTree, NoteTree, TreeKind},
 	};
 
 	/// A non-trivial field element derived from `n`.
@@ -257,5 +257,56 @@ pub mod fixtures {
 	/// The dummy value commitment as a field element.
 	pub fn dummy_cv() -> Fp {
 		cv_dummy()
+	}
+
+	/// A receipt for the 42-unit payment of [`c1`].
+	pub fn c4() -> C4Witness {
+		let payment = c1(0);
+		C4Witness {
+			pk_s: fe(50),
+			pk_r: payment.pk_r,
+			cv: arxon_zk_primitives::poseidon::hash_cv(payment.amount, payment.blinding),
+			nonce: fe(51),
+			bundle_digest: digest(),
+			expiry_block: EXPIRY,
+		}
+	}
+
+	/// A disclosure of the receipt in [`c4`] under `disclosure_mask` to audience `fe(60)`.
+	pub fn c5(disclosure_mask: u8) -> C5Witness {
+		let payment = c1(0);
+		C5Witness {
+			pk_s: fe(50),
+			pk_r: payment.pk_r,
+			amount: payment.amount,
+			blinding: payment.blinding,
+			nonce: fe(51),
+			disclosure_mask,
+			audience: fe(60),
+			expiry_block: EXPIRY,
+		}
+	}
+
+	/// A registry with two decoys and the member at index 1, plus the membership witness for a note to that member.
+	pub fn c6_tree() -> (MemberTree, C6Witness) {
+		let pk_member = fe(70);
+		let mut tree = MemberTree::new(TreeKind::Member);
+		tree.insert(arxon_zk_primitives::poseidon::hash_member_leaf(fe(71)));
+		let index = tree.insert(arxon_zk_primitives::poseidon::hash_member_leaf(pk_member));
+		tree.insert(arxon_zk_primitives::poseidon::hash_member_leaf(fe(72)));
+		let witness = C6Witness {
+			pk_member,
+			amount: 42,
+			rho: fe(73),
+			path: tree.path(index),
+			bundle_digest: digest(),
+			expiry_block: EXPIRY,
+		};
+		(tree, witness)
+	}
+
+	/// The membership witness of [`c6_tree`].
+	pub fn c6() -> C6Witness {
+		c6_tree().1
 	}
 }

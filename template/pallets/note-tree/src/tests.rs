@@ -1,0 +1,286 @@
+//! One behaviour per test. The oracle is a naive full recomputation with the
+//! same tagged Poseidon the pallet uses.
+
+use arxon_zk_primitives::{
+	poseidon::{fp_from_bytes, fp_to_bytes, hash_merkle_member, hash_merkle_note, Fp},
+	FieldBytes, TREE_DEPTH,
+};
+use frame_support::{assert_noop, assert_ok};
+
+use crate::{
+	mock::{new_test_ext, NoteTree, RuntimeEvent, RuntimeOrigin, System, Test, ROOT_HISTORY},
+	pallet::CAPACITY,
+	Error, Event, KnownRoots, MerkleTree, NextLeafIndex, TreeId,
+};
+
+/// Frozen empty roots (also pinned in `arxon-zk`'s reference tree tests).
+const NOTE_EMPTY_ROOT: &str = "b8a0934bd1708c4a147bf33ee7da4dc521f7c9b16d638e09269d33c4dd3c6f16";
+const MEMBER_EMPTY_ROOT: &str = "05b80f0172db899364a4c79fd9803a93eb3adb9cc418966de2e73614238df215";
+
+fn leaf(v: u64) -> FieldBytes {
+	fp_to_bytes(&Fp::from(v))
+}
+
+fn hex_root(root: FieldBytes) -> String {
+	hex::encode(root.0)
+}
+
+/// Naive oracle: root of `leaves` padded with empty leaves to depth 32.
+fn reference_root(tree: TreeId, leaves: &[FieldBytes]) -> FieldBytes {
+	let hash = |l: Fp, r: Fp| match tree {
+		TreeId::Note => hash_merkle_note(l, r),
+		TreeId::Membership => hash_merkle_member(l, r),
+	};
+	let mut empty = Fp::from(0);
+	let mut level: Vec<Fp> = leaves.iter().map(|l| fp_from_bytes(l).unwrap()).collect();
+	for _ in 0..TREE_DEPTH {
+		let mut next = Vec::with_capacity(level.len().div_ceil(2) + 1);
+		for pair in level.chunks(2) {
+			let l = pair[0];
+			let r = if pair.len() == 2 { pair[1] } else { empty };
+			next.push(hash(l, r));
+		}
+		empty = hash(empty, empty);
+		level = next;
+	}
+	fp_to_bytes(&level.first().copied().unwrap_or(empty))
+}
+
+// --- empty tree ---------------------------------------------------------------------------------
+
+#[test]
+fn empty_note_root_matches_frozen_constant() {
+	new_test_ext().execute_with(|| {
+		assert_eq!(hex_root(NoteTree::root(TreeId::Note)), NOTE_EMPTY_ROOT);
+	});
+}
+
+#[test]
+fn empty_membership_root_matches_frozen_constant() {
+	new_test_ext().execute_with(|| {
+		assert_eq!(
+			hex_root(NoteTree::root(TreeId::Membership)),
+			MEMBER_EMPTY_ROOT
+		);
+	});
+}
+
+#[test]
+fn empty_root_equals_reference_of_no_leaves() {
+	new_test_ext().execute_with(|| {
+		assert_eq!(
+			NoteTree::root(TreeId::Note),
+			reference_root(TreeId::Note, &[])
+		);
+	});
+}
+
+#[test]
+fn empty_root_is_not_a_known_anchor() {
+	new_test_ext().execute_with(|| {
+		let root = NoteTree::root(TreeId::Note);
+
+		assert!(!NoteTree::is_known_root(TreeId::Note, &root));
+	});
+}
+
+// --- inserts ------------------------------------------------------------------------------------
+
+#[test]
+fn inserting_one_leaf_matches_reference_root() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(NoteTree::insert(TreeId::Note, &leaf(11)));
+
+		assert_eq!(
+			NoteTree::root(TreeId::Note),
+			reference_root(TreeId::Note, &[leaf(11)])
+		);
+	});
+}
+
+#[test]
+fn inserting_five_leaves_matches_reference_root_after_each() {
+	new_test_ext().execute_with(|| {
+		let leaves: Vec<FieldBytes> = (1..=5).map(leaf).collect();
+
+		for i in 0..leaves.len() {
+			assert_ok!(NoteTree::insert(TreeId::Note, &leaves[i]));
+			assert_eq!(
+				NoteTree::root(TreeId::Note),
+				reference_root(TreeId::Note, &leaves[..=i]),
+				"after leaf {i}"
+			);
+		}
+	});
+}
+
+#[test]
+fn insert_returns_sequential_indices_and_records_them() {
+	new_test_ext().execute_with(|| {
+		assert_eq!(NoteTree::insert(TreeId::Note, &leaf(1)), Ok(0));
+		assert_eq!(NoteTree::insert(TreeId::Note, &leaf(2)), Ok(1));
+
+		assert_eq!(NoteTree::leaf_count(TreeId::Note), 2);
+		assert_eq!(NoteTree::leaf_index(TreeId::Note, &leaf(2)), Some(1));
+		assert_eq!(NoteTree::leaf_index(TreeId::Note, &leaf(3)), None);
+	});
+}
+
+#[test]
+fn insert_emits_leaf_inserted_with_new_root() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(NoteTree::insert(TreeId::Note, &leaf(1)));
+
+		System::assert_last_event(RuntimeEvent::NoteTree(Event::LeafInserted {
+			tree: TreeId::Note,
+			index: 0,
+			leaf: leaf(1),
+			root: NoteTree::root(TreeId::Note),
+		}));
+	});
+}
+
+#[test]
+fn insert_rejects_duplicate_leaf() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(NoteTree::insert(TreeId::Note, &leaf(1)));
+
+		assert_noop!(
+			NoteTree::insert(TreeId::Note, &leaf(1)),
+			Error::<Test>::DuplicateLeaf
+		);
+	});
+}
+
+#[test]
+fn insert_rejects_non_canonical_leaf() {
+	new_test_ext().execute_with(|| {
+		assert_noop!(
+			NoteTree::insert(TreeId::Note, &FieldBytes([0xff; 32])),
+			Error::<Test>::InvalidFieldElement
+		);
+	});
+}
+
+#[test]
+fn insert_fails_with_tree_full_when_capacity_is_reached() {
+	new_test_ext().execute_with(|| {
+		NextLeafIndex::<Test>::insert(TreeId::Note, CAPACITY);
+
+		assert_noop!(
+			NoteTree::insert(TreeId::Note, &leaf(1)),
+			Error::<Test>::TreeFull
+		);
+	});
+}
+
+#[test]
+fn the_two_trees_are_independent() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(NoteTree::insert(TreeId::Note, &leaf(1)));
+
+		assert_eq!(NoteTree::leaf_count(TreeId::Membership), 0);
+		assert_eq!(
+			hex_root(NoteTree::root(TreeId::Membership)),
+			MEMBER_EMPTY_ROOT
+		);
+		assert_ok!(NoteTree::insert(TreeId::Membership, &leaf(1)), 0);
+	});
+}
+
+#[test]
+fn same_leaves_give_different_roots_in_each_tree() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(NoteTree::insert(TreeId::Note, &leaf(1)));
+		assert_ok!(NoteTree::insert(TreeId::Membership, &leaf(1)));
+
+		assert_ne!(
+			NoteTree::root(TreeId::Note),
+			NoteTree::root(TreeId::Membership)
+		);
+		assert_eq!(
+			NoteTree::root(TreeId::Membership),
+			reference_root(TreeId::Membership, &[leaf(1)])
+		);
+	});
+}
+
+// --- root history -------------------------------------------------------------------------------
+
+#[test]
+fn is_known_root_true_for_current_and_recent_roots() {
+	new_test_ext().execute_with(|| {
+		let mut roots = Vec::new();
+		for i in 1..=ROOT_HISTORY as u64 {
+			assert_ok!(NoteTree::insert(TreeId::Note, &leaf(i)));
+			roots.push(NoteTree::root(TreeId::Note));
+		}
+
+		for r in &roots {
+			assert!(NoteTree::is_known_root(TreeId::Note, r));
+		}
+	});
+}
+
+#[test]
+fn root_history_evicts_oldest_root_after_capacity() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(NoteTree::insert(TreeId::Note, &leaf(1)));
+		let oldest = NoteTree::root(TreeId::Note);
+		for i in 2..=(ROOT_HISTORY as u64 + 1) {
+			assert_ok!(NoteTree::insert(TreeId::Note, &leaf(i)));
+		}
+
+		assert!(!NoteTree::is_known_root(TreeId::Note, &oldest));
+		assert_eq!(
+			KnownRoots::<Test>::iter_prefix(TreeId::Note).count(),
+			ROOT_HISTORY as usize
+		);
+	});
+}
+
+#[test]
+fn is_known_root_false_for_unknown_root() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(NoteTree::insert(TreeId::Note, &leaf(1)));
+
+		assert!(!NoteTree::is_known_root(TreeId::Note, &leaf(99)));
+	});
+}
+
+// --- add_member extrinsic -----------------------------------------------------------------------
+
+#[test]
+fn add_member_requires_root_origin() {
+	new_test_ext().execute_with(|| {
+		assert_noop!(
+			NoteTree::add_member(RuntimeOrigin::signed(1), leaf(1)),
+			sp_runtime::DispatchError::BadOrigin
+		);
+	});
+}
+
+#[test]
+fn add_member_updates_membership_root_only() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(NoteTree::add_member(RuntimeOrigin::root(), leaf(1)));
+
+		assert_eq!(
+			NoteTree::root(TreeId::Membership),
+			reference_root(TreeId::Membership, &[leaf(1)])
+		);
+		assert_eq!(hex_root(NoteTree::root(TreeId::Note)), NOTE_EMPTY_ROOT);
+	});
+}
+
+#[test]
+fn add_member_rejects_duplicate_member() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(NoteTree::add_member(RuntimeOrigin::root(), leaf(1)));
+
+		assert_noop!(
+			NoteTree::add_member(RuntimeOrigin::root(), leaf(1)),
+			Error::<Test>::DuplicateLeaf
+		);
+	});
+}

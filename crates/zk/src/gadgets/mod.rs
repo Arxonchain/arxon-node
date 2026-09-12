@@ -11,6 +11,7 @@
 //! Prover-side computations must therefore live inside `Value::map`, never in
 //! control flow.
 
+pub mod balance;
 pub mod binding;
 pub mod mask;
 pub mod merkle;

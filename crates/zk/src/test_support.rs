@@ -136,3 +136,126 @@ pub fn assert_circuit_metadata_consistent<C: ArxonCircuit>() {
 		C::NAME
 	);
 }
+
+/// Deterministic witnesses for the chain circuits.
+pub mod fixtures {
+	use arxon_zk_primitives::poseidon::cv_dummy;
+	use ff::Field;
+
+	use crate::{
+		circuits::{C1Witness, C2Witness, C3Witness},
+		field::Fp,
+		merkle::{NoteTree, TreeKind},
+	};
+
+	/// A non-trivial field element derived from `n`.
+	pub fn fe(n: u64) -> Fp {
+		Fp::from(n) * Fp::from(0x9e37_79b9_7f4a_7c15) + Fp::from(11)
+	}
+
+	/// Bundle digest used by every fixture.
+	pub fn digest() -> Fp {
+		fe(777)
+	}
+
+	/// Expiry block used by every fixture.
+	pub const EXPIRY: u32 = 1_000;
+
+	/// An output note of 42 units under `mask`.
+	pub fn c1(mask: u8) -> C1Witness {
+		C1Witness {
+			amount: 42,
+			blinding: fe(1),
+			pk_r: fe(2),
+			rho: fe(3),
+			mask,
+			bundle_digest: digest(),
+			expiry_block: EXPIRY,
+		}
+	}
+
+	/// The tree the C3 fixture spends from: three decoy notes and the real one at index 2.
+	pub fn c3_tree() -> (NoteTree, C3Witness) {
+		let sk = fe(10);
+		let amount = 42;
+		let rho = fe(12);
+		let cm = arxon_zk_primitives::poseidon::hash_note(
+			arxon_zk_primitives::poseidon::hash_pk(sk),
+			amount,
+			rho,
+		);
+		let mut tree = NoteTree::new(TreeKind::Note);
+		tree.insert(fe(100));
+		tree.insert(fe(101));
+		let index = tree.insert(cm);
+		tree.insert(fe(103));
+		let witness = C3Witness {
+			sk,
+			amount,
+			rho,
+			blinding: fe(13),
+			mask: 0,
+			path: tree.path(index),
+			bundle_digest: digest(),
+			expiry_block: EXPIRY,
+		};
+		(tree, witness)
+	}
+
+	/// A spend of the note in [`c3_tree`] under `mask`.
+	pub fn c3(mask: u8) -> C3Witness {
+		let (_, mut w) = c3_tree();
+		w.mask = mask;
+		w
+	}
+
+	/// A balanced 2-in / 2-out transfer: 30 + 12 = 40 + 2.
+	pub fn c2_transfer() -> C2Witness {
+		C2Witness {
+			v_in: [30, 12],
+			r_in: [fe(21), fe(22)],
+			v_out: [40, 2],
+			r_out: [fe(23), fe(24)],
+			transparent_in: 0,
+			transparent_out: 0,
+			fee: 0,
+			bundle_digest: digest(),
+			expiry_block: EXPIRY,
+		}
+	}
+
+	/// A shield of 42 units into one note; unused slots are the dummy commitment.
+	pub fn c2_shield() -> C2Witness {
+		C2Witness {
+			v_in: [0, 0],
+			r_in: [Fp::ZERO, Fp::ZERO],
+			v_out: [42, 0],
+			r_out: [fe(1), Fp::ZERO],
+			transparent_in: 42,
+			transparent_out: 0,
+			fee: 0,
+			bundle_digest: digest(),
+			expiry_block: EXPIRY,
+		}
+	}
+
+	/// An unshield of 40 units from one 42-unit note with 2 units of change.
+	pub fn c2_unshield() -> C2Witness {
+		C2Witness {
+			v_in: [42, 0],
+			r_in: [fe(13), Fp::ZERO],
+			v_out: [2, 0],
+			r_out: [fe(31), Fp::ZERO],
+			transparent_in: 0,
+			transparent_out: 40,
+			fee: 0,
+			bundle_digest: digest(),
+			expiry_block: EXPIRY,
+		}
+	}
+
+	/// The dummy value commitment as a field element.
+	pub fn dummy_cv() -> Fp {
+		cv_dummy()
+	}
+}

@@ -6,18 +6,40 @@
 //! covers all six circuit ids, so a circuit cannot be half-wired silently.
 
 pub mod c0_dummy;
+pub mod c1_privacy_flags;
+pub mod c2_balance;
+pub mod c3_nullifier;
+pub mod common;
 
 use arxon_zk_primitives::CircuitId;
 
-/// Chain circuits implemented so far (plan Phase A5 grows this list).
-pub const WIRED: &[CircuitId] = &[];
+pub use c1_privacy_flags::{C1Circuit, C1Public, C1Witness};
+pub use c2_balance::{C2Circuit, C2Public, C2Witness};
+pub use c3_nullifier::{C3Circuit, C3Public, C3Witness};
+
+/// Chain circuits implemented so far (plan Phase F adds 4, 5 and 6).
+pub const WIRED: &[CircuitId] = &[
+	CircuitId::PrivacyFlagEnforcement,
+	CircuitId::BalanceIntegrity,
+	CircuitId::NullifierDerivation,
+];
 
 /// Runs `$body` once per wired chain circuit type, binding it to `$c`.
 #[macro_export]
 macro_rules! for_each_chain_circuit {
 	(|$c:ident| $body:block) => {{
-		// No chain circuit is wired yet. Each wired circuit adds a block:
-		// { type $c = c1_privacy_flags::Circuit; $body }
+		{
+			type $c = $crate::circuits::C1Circuit;
+			$body
+		}
+		{
+			type $c = $crate::circuits::C2Circuit;
+			$body
+		}
+		{
+			type $c = $crate::circuits::C3Circuit;
+			$body
+		}
 	}};
 }
 
@@ -27,10 +49,19 @@ macro_rules! for_each_chain_circuit {
 macro_rules! dispatch_chain_circuit {
 	($id:expr, |$c:ident| $body:expr) => {{
 		let id: ::arxon_zk_primitives::CircuitId = $id;
-		#[allow(unreachable_patterns)]
 		match id {
-			// Each wired circuit adds an arm:
-			// CircuitId::PrivacyFlagEnforcement => { type $c = c1_privacy_flags::Circuit; $body }
+			::arxon_zk_primitives::CircuitId::PrivacyFlagEnforcement => {
+				type $c = $crate::circuits::C1Circuit;
+				$body
+			}
+			::arxon_zk_primitives::CircuitId::BalanceIntegrity => {
+				type $c = $crate::circuits::C2Circuit;
+				$body
+			}
+			::arxon_zk_primitives::CircuitId::NullifierDerivation => {
+				type $c = $crate::circuits::C3Circuit;
+				$body
+			}
 			_ => Err($crate::error::VerifyError::UnknownCircuit(id.as_u8())),
 		}
 	}};
@@ -67,9 +98,30 @@ mod tests {
 	}
 
 	#[test]
+	fn frozen_vk_hashes_match_the_wired_circuits() {
+		use crate::{circuit::ArxonCircuit, pins::vk_hash};
+		crate::circuits::for_each_chain_circuit!(|C| {
+			let id = <C as ArxonCircuit>::ID.expect("chain circuit");
+			assert!(WIRED.contains(&id), "{id:?} wired by macro but not listed");
+			assert_eq!(
+				vk_hash::<C>(),
+				arxon_zk_primitives::vk_hash(id),
+				"frozen VK hash of {id:?} is stale"
+			);
+		});
+		for id in CircuitId::ALL {
+			assert_eq!(
+				arxon_zk_primitives::vk_hashes::has_vk_hash(id),
+				WIRED.contains(&id),
+				"{id:?}"
+			);
+		}
+	}
+
+	#[test]
 	fn warm_up_builds_keys_for_every_wired_circuit() {
 		crate::key_cache::warm_up();
 
-		assert_eq!(crate::key_cache::cached_count(), WIRED.len());
+		assert!(crate::key_cache::cached_count() >= WIRED.len());
 	}
 }

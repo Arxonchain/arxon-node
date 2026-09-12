@@ -58,8 +58,6 @@ pub fn verify_by_id(
 			got: proof.len(),
 		});
 	}
-	// The dispatch table is empty until the chain circuits land (plan Phase A5).
-	let _ = instances;
 	crate::circuits::dispatch_chain_circuit!(id, |C| verify_bytes::<C>(proof, instances))
 }
 
@@ -73,7 +71,6 @@ pub fn verify_by_wire_id(
 	verify_by_id(id, proof, instances)
 }
 
-#[allow(dead_code)] // wired by `dispatch_chain_circuit!` as chain circuits land
 fn verify_bytes<C: ArxonCircuit + 'static>(
 	proof: &[u8],
 	instances: &[Vec<FieldBytes>],

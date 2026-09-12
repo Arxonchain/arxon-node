@@ -55,15 +55,10 @@ fp-evm = { workspace = true, features = ["serde"] }
 fp-rpc = { workspace = true }
 fp-self-contained = { workspace = true, features = ["serde"] }
 # Frontier FRAME
+pallet-arx-claim = { workspace = true }
 pallet-base-fee = { workspace = true }
 pallet-dynamic-fee = { workspace = true }
 pallet-ethereum = { workspace = true }
-pallet-mining = { workspace = true }
-pallet-privacy = { workspace = true }
-pallet-arx-claim = { workspace = true }
-pallet-ptr = { workspace = true }
-pallet-trust-registry = { workspace = true }
-pallet-quantum-account = { workspace = true }
 pallet-evm = { workspace = true }
 pallet-evm-chain-id = { workspace = true }
 pallet-evm-precompile-curve25519 = { workspace = true }
@@ -72,6 +67,11 @@ pallet-evm-precompile-modexp = { workspace = true }
 pallet-evm-precompile-sha3fips = { workspace = true }
 pallet-evm-precompile-sha3fips-benchmarking = { workspace = true }
 pallet-evm-precompile-simple = { workspace = true }
+pallet-mining = { workspace = true }
+pallet-privacy = { workspace = true }
+pallet-ptr = { workspace = true }
+pallet-quantum-account = { workspace = true }
+pallet-trust-registry = { workspace = true }
 
 # Polkadot
 polkadot-runtime-common = { workspace = true }
@@ -140,6 +140,11 @@ std = [
 	"polkadot-runtime-common/std",
 	# Cumulus primitives
 	"cumulus-pallet-weight-reclaim/std",
+	"pallet-mining/std",
+	"pallet-privacy/std",
+	"pallet-arx-claim/std",
+	"pallet-ptr/std",
+	"pallet-trust-registry/std",
 	"pallet-quantum-account/std",
 ]
 runtime-benchmarks = [
@@ -155,4 +160,10 @@ runtime-benchmarks = [
 	"pallet-evm-precompile-curve25519-benchmarking/runtime-benchmarks",
 	"pallet-evm-precompile-sha3fips-benchmarking/runtime-benchmarks",
 	"polkadot-runtime-common/runtime-benchmarks",
+	"pallet-mining/runtime-benchmarks",
+	"pallet-privacy/runtime-benchmarks",
+	"pallet-arx-claim/runtime-benchmarks",
+	"pallet-ptr/runtime-benchmarks",
+	"pallet-trust-registry/runtime-benchmarks",
+	"pallet-quantum-account/runtime-benchmarks",
 ]

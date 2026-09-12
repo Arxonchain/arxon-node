@@ -187,6 +187,11 @@ pub fn cv_dummy() -> Fp {
 	hash_cv(0, Fp::ZERO)
 }
 
+/// [`cv_dummy`] as canonical bytes (what the runtime places in unused Circuit 2 rows).
+pub fn cv_dummy_bytes() -> FieldBytes {
+	fp_to_bytes(&cv_dummy())
+}
+
 /// Which Merkle tree a node hash belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MerkleDomain {

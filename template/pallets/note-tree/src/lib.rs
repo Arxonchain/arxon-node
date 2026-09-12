@@ -111,6 +111,9 @@ pub trait MerkleTree {
 
 	/// Current root.
 	fn current_root(tree: TreeId) -> FieldBytes;
+
+	/// `true` iff `leaf` was already inserted (an insert would fail with a duplicate).
+	fn contains_leaf(tree: TreeId, leaf: &FieldBytes) -> bool;
 }
 
 #[frame_support::pallet]
@@ -321,6 +324,10 @@ pub mod pallet {
 
 		fn current_root(tree: TreeId) -> FieldBytes {
 			Pallet::<T>::root(tree)
+		}
+
+		fn contains_leaf(tree: TreeId, leaf: &FieldBytes) -> bool {
+			KnownLeaves::<T>::contains_key(tree, leaf)
 		}
 	}
 }

@@ -1175,8 +1175,23 @@ impl pallet_mining::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
 }
 
+parameter_types! {
+	pub const PrivacyPalletId: frame_support::PalletId = frame_support::PalletId(*b"arx/shld");
+}
+
 impl pallet_privacy::Config for Runtime {
-    type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type PalletId = PrivacyPalletId;
+	// 1 ARX = 10^9 shielded units; circuits range-check amounts to u64.
+	type ShieldedUnit = ConstU128<1_000_000_000>;
+	// A bundle's expiry block may be at most this many blocks ahead.
+	type MaxProofValidity = ConstU32<128>;
+	type ZkVerifier = ZkVerifier;
+	type Nullifiers = NullifierRegistry;
+	type Trees = NoteTree;
+	// pallet-ptr takes over once it is rewritten to commitments (plan Phase F).
+	type Receipts = ();
+	type WeightInfo = ();
 }
 
 impl pallet_arx_claim::Config for Runtime {

@@ -68,9 +68,9 @@ impl CircuitId {
 	/// Number of public input rows per instance (frozen contract v2).
 	pub const fn public_input_len(self) -> usize {
 		match self {
-			CircuitId::PrivacyFlagEnforcement => 9,
+			CircuitId::PrivacyFlagEnforcement => 8,
 			CircuitId::BalanceIntegrity => 10,
-			CircuitId::NullifierDerivation => 6,
+			CircuitId::NullifierDerivation => 8,
 			CircuitId::PtrGeneration => 5,
 			CircuitId::DisclosureProof => 8,
 			CircuitId::TrustRegistryMembership => 5,

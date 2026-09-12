@@ -3,19 +3,18 @@
 
 use arxon_zk_primitives::{
 	poseidon::{fp_from_bytes, fp_to_bytes, hash_merkle_member, hash_merkle_note, Fp},
-	FieldBytes, TREE_DEPTH,
+	FieldBytes, MEMBER_TREE_DEPTH, NOTE_TREE_DEPTH,
 };
 use frame_support::{assert_noop, assert_ok};
 
 use crate::{
 	mock::{new_test_ext, NoteTree, RuntimeEvent, RuntimeOrigin, System, Test, ROOT_HISTORY},
-	pallet::CAPACITY,
 	Error, Event, KnownRoots, MerkleTree, NextLeafIndex, TreeId,
 };
 
 /// Frozen empty roots (also pinned in `arxon-zk`'s reference tree tests).
-const NOTE_EMPTY_ROOT: &str = "b8a0934bd1708c4a147bf33ee7da4dc521f7c9b16d638e09269d33c4dd3c6f16";
-const MEMBER_EMPTY_ROOT: &str = "05b80f0172db899364a4c79fd9803a93eb3adb9cc418966de2e73614238df215";
+const NOTE_EMPTY_ROOT: &str = "1ca704bf814299b9f2b8c2331355744f2f23b9ad33e794590c9153a21fca001f";
+const MEMBER_EMPTY_ROOT: &str = "cb7b604832ada5c237d29fb877d9fd8a127cf14c95c1a23d0338aad69d3fe906";
 
 fn leaf(v: u64) -> FieldBytes {
 	fp_to_bytes(&Fp::from(v))
@@ -25,15 +24,15 @@ fn hex_root(root: FieldBytes) -> String {
 	hex::encode(root.0)
 }
 
-/// Naive oracle: root of `leaves` padded with empty leaves to depth 32.
+/// Naive oracle: root of `leaves` padded with empty leaves to the tree's depth.
 fn reference_root(tree: TreeId, leaves: &[FieldBytes]) -> FieldBytes {
-	let hash = |l: Fp, r: Fp| match tree {
-		TreeId::Note => hash_merkle_note(l, r),
-		TreeId::Membership => hash_merkle_member(l, r),
+	let (hash, depth): (fn(Fp, Fp) -> Fp, usize) = match tree {
+		TreeId::Note => (hash_merkle_note, NOTE_TREE_DEPTH),
+		TreeId::Membership => (hash_merkle_member, MEMBER_TREE_DEPTH),
 	};
 	let mut empty = Fp::from(0);
 	let mut level: Vec<Fp> = leaves.iter().map(|l| fp_from_bytes(l).unwrap()).collect();
-	for _ in 0..TREE_DEPTH {
+	for _ in 0..depth {
 		let mut next = Vec::with_capacity(level.len().div_ceil(2) + 1);
 		for pair in level.chunks(2) {
 			let l = pair[0];
@@ -82,6 +81,13 @@ fn empty_root_is_not_a_known_anchor() {
 
 		assert!(!NoteTree::is_known_root(TreeId::Note, &root));
 	});
+}
+
+#[test]
+fn tree_depths_are_32_for_notes_and_16_for_members() {
+	assert_eq!(TreeId::Note.depth(), 32);
+	assert_eq!(TreeId::Membership.depth(), 16);
+	assert_eq!(TreeId::Membership.capacity(), 1 << 16);
 }
 
 // --- inserts ------------------------------------------------------------------------------------
@@ -165,7 +171,7 @@ fn insert_rejects_non_canonical_leaf() {
 #[test]
 fn insert_fails_with_tree_full_when_capacity_is_reached() {
 	new_test_ext().execute_with(|| {
-		NextLeafIndex::<Test>::insert(TreeId::Note, CAPACITY);
+		NextLeafIndex::<Test>::insert(TreeId::Note, TreeId::Note.capacity());
 
 		assert_noop!(
 			NoteTree::insert(TreeId::Note, &leaf(1)),

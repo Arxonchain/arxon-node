@@ -11,7 +11,7 @@ use crate::{
 	circuit_id::CircuitId,
 	constants::{C2_INPUTS, C2_OUTPUTS, CHAIN_ID},
 	field_bytes::FieldBytes,
-	mask::{hides_amount, hides_receiver, hides_sender},
+	mask::{hides_amount, hides_balance, hides_receiver, hides_sender, is_valid_mask},
 };
 
 /// Common shape of every public input layout.
@@ -33,7 +33,7 @@ pub const fn chain_id_row() -> FieldBytes {
 	FieldBytes::from_u64(CHAIN_ID)
 }
 
-/// Fields a Circuit 1 or Circuit 5 instance reveals. A hidden field is `FieldBytes::ZERO`.
+/// Fields a bundle (Circuits 1 and 3) or a disclosure (Circuit 5) reveals. A hidden field is `FieldBytes::ZERO`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RevealedFields {
 	/// Sender shielded public key, or zero when hidden.
@@ -68,6 +68,9 @@ impl RevealedFields {
 }
 
 /// Circuit 1, one instance per output note.
+///
+/// The sender is not revealed here: an output-only circuit cannot prove who
+/// spends, so `revealed_sender` lives in Circuit 3 next to the proven spend key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct C1PublicInputs {
 	/// Value commitment `H_CV(amount, blinding)`.
@@ -76,8 +79,10 @@ pub struct C1PublicInputs {
 	pub cm: FieldBytes,
 	/// Four-flag mask as a field element.
 	pub mask: FieldBytes,
-	/// Revealed fields (zero where hidden).
-	pub revealed: RevealedFields,
+	/// Receiver shielded public key, or zero when hidden.
+	pub revealed_receiver: FieldBytes,
+	/// Amount in shielded units, or zero when hidden.
+	pub revealed_amount: FieldBytes,
 	/// Bundle digest.
 	pub bundle_digest: FieldBytes,
 	/// Chain id (7171).
@@ -88,6 +93,7 @@ pub struct C1PublicInputs {
 
 impl C1PublicInputs {
 	/// Builds the instance for `mask_bits`, zeroing revealed fields the mask hides.
+	/// `None` if `mask_bits` is not a valid four-flag mask (the circuit would reject it).
 	pub fn new(
 		cv: FieldBytes,
 		cm: FieldBytes,
@@ -95,31 +101,35 @@ impl C1PublicInputs {
 		revealed: RevealedFields,
 		bundle_digest: FieldBytes,
 		expiry_block: u32,
-	) -> Self {
-		C1PublicInputs {
+	) -> Option<Self> {
+		if !is_valid_mask(mask_bits) {
+			return None;
+		}
+		let revealed = revealed.masked(mask_bits);
+		Some(C1PublicInputs {
 			cv,
 			cm,
 			mask: FieldBytes::from_u8(mask_bits),
-			revealed: revealed.masked(mask_bits),
+			revealed_receiver: revealed.receiver,
+			revealed_amount: revealed.amount,
 			bundle_digest,
 			chain_id: chain_id_row(),
 			expiry_block: FieldBytes::from_u32(expiry_block),
-		}
+		})
 	}
 }
 
 impl PublicInputLayout for C1PublicInputs {
 	const CIRCUIT: CircuitId = CircuitId::PrivacyFlagEnforcement;
-	const LEN: usize = 9;
+	const LEN: usize = 8;
 
 	fn to_elements(&self) -> Vec<FieldBytes> {
 		alloc::vec![
 			self.cv,
 			self.cm,
 			self.mask,
-			self.revealed.sender,
-			self.revealed.receiver,
-			self.revealed.amount,
+			self.revealed_receiver,
+			self.revealed_amount,
 			self.bundle_digest,
 			self.chain_id,
 			self.expiry_block,
@@ -134,14 +144,11 @@ impl PublicInputLayout for C1PublicInputs {
 			cv: r[0],
 			cm: r[1],
 			mask: r[2],
-			revealed: RevealedFields {
-				sender: r[3],
-				receiver: r[4],
-				amount: r[5],
-			},
-			bundle_digest: r[6],
-			chain_id: r[7],
-			expiry_block: r[8],
+			revealed_receiver: r[3],
+			revealed_amount: r[4],
+			bundle_digest: r[5],
+			chain_id: r[6],
+			expiry_block: r[7],
 		})
 	}
 }
@@ -228,6 +235,10 @@ impl PublicInputLayout for C2PublicInputs {
 }
 
 /// Circuit 3, one instance per spent note.
+///
+/// Carries the bundle mask and the revealed sender: the spend key `sk` is
+/// proven here, so `pk = H_PK(sk)` is the one key that can honestly be called
+/// the sender.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct C3PublicInputs {
 	/// Recent note tree root the inclusion path opens to.
@@ -236,6 +247,10 @@ pub struct C3PublicInputs {
 	pub nullifier: FieldBytes,
 	/// Fresh value commitment of the spent amount, consumed by Circuit 2.
 	pub cv: FieldBytes,
+	/// Four-flag mask as a field element.
+	pub mask: FieldBytes,
+	/// Sender shielded public key `H_PK(sk)`, or zero when hidden.
+	pub revealed_sender: FieldBytes,
 	/// Bundle digest.
 	pub bundle_digest: FieldBytes,
 	/// Chain id (7171).
@@ -245,37 +260,51 @@ pub struct C3PublicInputs {
 }
 
 impl C3PublicInputs {
-	/// Builds the instance.
+	/// Builds the instance; `revealed_sender` is zeroed when the mask hides the sender.
+	/// `None` if `mask_bits` is not a valid four-flag mask.
 	pub fn new(
 		anchor: FieldBytes,
 		nullifier: FieldBytes,
 		cv: FieldBytes,
+		mask_bits: u8,
+		revealed_sender: FieldBytes,
 		bundle_digest: FieldBytes,
 		expiry_block: u32,
-	) -> Self {
-		C3PublicInputs {
+	) -> Option<Self> {
+		if !is_valid_mask(mask_bits) {
+			return None;
+		}
+		Some(C3PublicInputs {
 			anchor,
 			nullifier,
 			cv,
+			mask: FieldBytes::from_u8(mask_bits),
+			revealed_sender: if hides_sender(mask_bits) {
+				FieldBytes::ZERO
+			} else {
+				revealed_sender
+			},
 			bundle_digest,
 			chain_id: chain_id_row(),
 			expiry_block: FieldBytes::from_u32(expiry_block),
-		}
+		})
 	}
 }
 
 impl PublicInputLayout for C3PublicInputs {
 	const CIRCUIT: CircuitId = CircuitId::NullifierDerivation;
-	const LEN: usize = 6;
+	const LEN: usize = 8;
 
 	fn to_elements(&self) -> Vec<FieldBytes> {
 		alloc::vec![
 			self.anchor,
 			self.nullifier,
 			self.cv,
+			self.mask,
+			self.revealed_sender,
 			self.bundle_digest,
 			self.chain_id,
-			self.expiry_block
+			self.expiry_block,
 		]
 	}
 
@@ -287,9 +316,11 @@ impl PublicInputLayout for C3PublicInputs {
 			anchor: r[0],
 			nullifier: r[1],
 			cv: r[2],
-			bundle_digest: r[3],
-			chain_id: r[4],
-			expiry_block: r[5],
+			mask: r[3],
+			revealed_sender: r[4],
+			bundle_digest: r[5],
+			chain_id: r[6],
+			expiry_block: r[7],
 		})
 	}
 }
@@ -374,21 +405,25 @@ pub struct C5PublicInputs {
 
 impl C5PublicInputs {
 	/// Builds the instance, zeroing revealed fields the disclosure mask keeps hidden.
+	/// `None` if the mask is invalid or sets bit 3 (a receipt has no balance to disclose).
 	pub fn new(
 		ptr_id: FieldBytes,
 		disclosure_mask: u8,
 		revealed: RevealedFields,
 		audience: FieldBytes,
 		expiry_block: u32,
-	) -> Self {
-		C5PublicInputs {
+	) -> Option<Self> {
+		if !is_valid_mask(disclosure_mask) || hides_balance(disclosure_mask) {
+			return None;
+		}
+		Some(C5PublicInputs {
 			ptr_id,
 			disclosure_mask: FieldBytes::from_u8(disclosure_mask),
 			revealed: revealed.masked(disclosure_mask),
 			audience,
 			chain_id: chain_id_row(),
 			expiry_block: FieldBytes::from_u32(expiry_block),
-		}
+		})
 	}
 }
 

@@ -1,7 +1,7 @@
 //! # Note tree (runtime index 20)
 //!
-//! Two append-only Merkle trees of depth 32 over tagged Poseidon on Pallas,
-//! identified by [`TreeId`]:
+//! Two append-only Merkle trees over Arxon-domain Poseidon on Pallas,
+//! identified by [`TreeId`] (depth 32 for notes, 16 for the registry):
 //!
 //! * `Note`: every shielded note commitment `cm`. Filled only by
 //!   `pallet-privacy` through [`MerkleTree::insert`] after the proofs verified.
@@ -32,7 +32,7 @@ mod tests;
 
 use arxon_zk_primitives::{
 	poseidon::{hash_two_bytes, MerkleDomain},
-	FieldBytes,
+	FieldBytes, MEMBER_TREE_DEPTH, NOTE_TREE_DEPTH,
 };
 use frame_support::pallet_prelude::*;
 use scale_codec::{Decode, DecodeWithMemTracking, Encode, MaxEncodedLen};
@@ -71,6 +71,19 @@ impl TreeId {
 			TreeId::Membership => MerkleDomain::Member,
 		}
 	}
+
+	/// Depth of this tree.
+	pub const fn depth(self) -> u8 {
+		match self {
+			TreeId::Note => NOTE_TREE_DEPTH as u8,
+			TreeId::Membership => MEMBER_TREE_DEPTH as u8,
+		}
+	}
+
+	/// Maximum number of leaves.
+	pub const fn capacity(self) -> u64 {
+		1u64 << self.depth()
+	}
 }
 
 /// Node hash of a tree. `None` iff an input is not a canonical field element.
@@ -102,16 +115,11 @@ pub trait MerkleTree {
 
 #[frame_support::pallet]
 pub mod pallet {
-	use arxon_zk_primitives::{FieldBytes, TREE_DEPTH};
+	use arxon_zk_primitives::FieldBytes;
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
 
 	use super::{weights::WeightInfo, MerkleHasher, MerkleTree, TreeId};
-
-	/// Depth of both trees as a level index type.
-	pub const DEPTH: u8 = TREE_DEPTH as u8;
-	/// Maximum number of leaves per tree.
-	pub const CAPACITY: u64 = 1 << TREE_DEPTH;
 
 	#[pallet::pallet]
 	pub struct Pallet<T>(_);
@@ -184,7 +192,7 @@ pub mod pallet {
 
 	#[pallet::error]
 	pub enum Error<T> {
-		/// The tree holds `2^32` leaves.
+		/// The tree reached its capacity (`2^depth` leaves).
 		TreeFull,
 		/// The leaf was already inserted.
 		DuplicateLeaf,
@@ -214,7 +222,7 @@ pub mod pallet {
 			}
 			let mut current = FieldBytes::ZERO;
 			Zeros::<T>::insert(tree, 0, current);
-			for h in 1..=DEPTH {
+			for h in 1..=tree.depth() {
 				current = T::Hasher::hash_two(tree, &current, &current)
 					.ok_or(Error::<T>::InvalidFieldElement)?;
 				Zeros::<T>::insert(tree, h, current);
@@ -224,7 +232,7 @@ pub mod pallet {
 
 		/// Root of the empty tree.
 		pub fn empty_root(tree: TreeId) -> Result<FieldBytes, DispatchError> {
-			Self::zero_at(tree, DEPTH)
+			Self::zero_at(tree, tree.depth())
 		}
 
 		/// Current root (the empty root before the first insert).
@@ -251,11 +259,11 @@ pub mod pallet {
 				Error::<T>::DuplicateLeaf
 			);
 			let index = NextLeafIndex::<T>::get(tree);
-			ensure!(index < CAPACITY, Error::<T>::TreeFull);
+			ensure!(index < tree.capacity(), Error::<T>::TreeFull);
 
 			let mut current = *leaf;
 			let mut position = index;
-			for level in 0..DEPTH {
+			for level in 0..tree.depth() {
 				let (left, right) = if position & 1 == 0 {
 					FilledSubtrees::<T>::insert(tree, level, current);
 					(current, Self::zero_at(tree, level)?)

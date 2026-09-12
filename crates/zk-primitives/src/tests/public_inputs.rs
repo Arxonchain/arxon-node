@@ -18,6 +18,18 @@ fn revealed() -> RevealedFields {
 	}
 }
 
+fn c1(mask: u8) -> C1PublicInputs {
+	C1PublicInputs::new(fb(1), fb(2), mask, revealed(), fb(7), 100).expect("valid mask")
+}
+
+fn c3(mask: u8) -> C3PublicInputs {
+	C3PublicInputs::new(fb(1), fb(2), fb(3), mask, fb(0xa1), fb(7), 100).expect("valid mask")
+}
+
+fn c5(mask: u8) -> C5PublicInputs {
+	C5PublicInputs::new(fb(1), mask, revealed(), fb(9), 100).expect("valid mask")
+}
+
 #[test]
 fn chain_id_row_is_7171() {
 	assert_eq!(chain_id_row(), FieldBytes::from_u64(7171));
@@ -25,12 +37,9 @@ fn chain_id_row_is_7171() {
 }
 
 #[test]
-fn c1_public_inputs_to_elements_has_len_9_in_documented_order() {
-	let c1 = C1PublicInputs::new(fb(1), fb(2), 0b1000, revealed(), fb(7), 100);
+fn c1_public_inputs_to_elements_has_len_8_in_documented_order() {
+	let rows = c1(0b1000).to_elements();
 
-	let rows = c1.to_elements();
-
-	assert_eq!(rows.len(), 9);
 	assert_eq!(
 		rows.len(),
 		CircuitId::PrivacyFlagEnforcement.public_input_len()
@@ -38,29 +47,44 @@ fn c1_public_inputs_to_elements_has_len_9_in_documented_order() {
 	assert_eq!(rows[0], fb(1), "cv");
 	assert_eq!(rows[1], fb(2), "cm");
 	assert_eq!(rows[2], FieldBytes::from_u8(0b1000), "mask");
-	assert_eq!(rows[3], fb(0xa1), "revealed sender");
-	assert_eq!(rows[4], fb(0xa2), "revealed receiver");
-	assert_eq!(rows[5], FieldBytes::from_u64(42), "revealed amount");
-	assert_eq!(rows[6], fb(7), "bundle digest");
-	assert_eq!(rows[7], chain_id_row(), "chain id");
-	assert_eq!(rows[8], FieldBytes::from_u32(100), "expiry block");
+	assert_eq!(rows[3], fb(0xa2), "revealed receiver");
+	assert_eq!(rows[4], FieldBytes::from_u64(42), "revealed amount");
+	assert_eq!(rows[5], fb(7), "bundle digest");
+	assert_eq!(rows[6], chain_id_row(), "chain id");
+	assert_eq!(rows[7], FieldBytes::from_u32(100), "expiry block");
 }
 
 #[test]
 fn c1_new_zeroes_revealed_fields_the_mask_hides() {
-	let c1 = C1PublicInputs::new(fb(1), fb(2), 0b0101, revealed(), fb(7), 100);
+	let hidden_receiver = c1(0b0010);
+	let hidden_amount = c1(0b0100);
 
+	assert_eq!(hidden_receiver.revealed_receiver, FieldBytes::ZERO);
+	assert_eq!(hidden_receiver.revealed_amount, FieldBytes::from_u64(42));
+	assert_eq!(hidden_amount.revealed_receiver, fb(0xa2));
+	assert_eq!(hidden_amount.revealed_amount, FieldBytes::ZERO);
+}
+
+#[test]
+fn c1_new_rejects_invalid_mask() {
 	assert_eq!(
-		c1.revealed.sender,
-		FieldBytes::ZERO,
-		"hidden sender must be zero"
+		C1PublicInputs::new(fb(1), fb(2), 16, revealed(), fb(7), 100),
+		None
 	);
-	assert_eq!(c1.revealed.receiver, fb(0xa2), "shown receiver kept");
 	assert_eq!(
-		c1.revealed.amount,
-		FieldBytes::ZERO,
-		"hidden amount must be zero"
+		C1PublicInputs::new(fb(1), fb(2), 255, revealed(), fb(7), 100),
+		None
 	);
+}
+
+#[test]
+fn c1_accepts_every_valid_mask() {
+	for mask in 0..16u8 {
+		assert!(
+			C1PublicInputs::new(fb(1), fb(2), mask, revealed(), fb(7), 100).is_some(),
+			"mask {mask}"
+		);
+	}
 }
 
 #[test]
@@ -80,25 +104,38 @@ fn c2_public_inputs_to_elements_has_len_10_in_documented_order() {
 }
 
 #[test]
-fn c3_public_inputs_to_elements_has_len_6_in_documented_order() {
-	let c3 = C3PublicInputs::new(fb(1), fb(2), fb(3), fb(7), 100);
-
-	let rows = c3.to_elements();
+fn c3_public_inputs_to_elements_has_len_8_in_documented_order() {
+	let rows = c3(0b0000).to_elements();
 
 	assert_eq!(
 		rows.len(),
 		CircuitId::NullifierDerivation.public_input_len()
 	);
-	assert_eq!(&rows[..4], &[fb(1), fb(2), fb(3), fb(7)]);
-	assert_eq!(rows[4], chain_id_row());
-	assert_eq!(rows[5], FieldBytes::from_u32(100));
+	assert_eq!(&rows[..3], &[fb(1), fb(2), fb(3)], "anchor, nullifier, cv");
+	assert_eq!(rows[3], FieldBytes::ZERO, "mask");
+	assert_eq!(rows[4], fb(0xa1), "revealed sender");
+	assert_eq!(rows[5], fb(7), "bundle digest");
+	assert_eq!(rows[6], chain_id_row());
+	assert_eq!(rows[7], FieldBytes::from_u32(100));
+}
+
+#[test]
+fn c3_new_zeroes_sender_when_the_mask_hides_it() {
+	assert_eq!(c3(0b0001).revealed_sender, FieldBytes::ZERO);
+	assert_eq!(c3(0b1110).revealed_sender, fb(0xa1));
+}
+
+#[test]
+fn c3_new_rejects_invalid_mask() {
+	assert_eq!(
+		C3PublicInputs::new(fb(1), fb(2), fb(3), 16, fb(0xa1), fb(7), 100),
+		None
+	);
 }
 
 #[test]
 fn c4_public_inputs_to_elements_has_len_5_in_documented_order() {
-	let c4 = C4PublicInputs::new(fb(1), fb(2), fb(7), 100);
-
-	let rows = c4.to_elements();
+	let rows = C4PublicInputs::new(fb(1), fb(2), fb(7), 100).to_elements();
 
 	assert_eq!(rows.len(), CircuitId::PtrGeneration.public_input_len());
 	assert_eq!(&rows[..3], &[fb(1), fb(2), fb(7)]);
@@ -108,9 +145,7 @@ fn c4_public_inputs_to_elements_has_len_5_in_documented_order() {
 
 #[test]
 fn c5_public_inputs_to_elements_has_len_8_in_documented_order() {
-	let c5 = C5PublicInputs::new(fb(1), 0b0010, revealed(), fb(9), 100);
-
-	let rows = c5.to_elements();
+	let rows = c5(0b0010).to_elements();
 
 	assert_eq!(rows.len(), CircuitId::DisclosureProof.public_input_len());
 	assert_eq!(rows[0], fb(1), "ptr id");
@@ -124,10 +159,18 @@ fn c5_public_inputs_to_elements_has_len_8_in_documented_order() {
 }
 
 #[test]
-fn c6_public_inputs_to_elements_has_len_5_in_documented_order() {
-	let c6 = C6PublicInputs::new(fb(1), fb(2), fb(7), 100);
+fn c5_new_rejects_balance_bit_and_invalid_masks() {
+	assert_eq!(
+		C5PublicInputs::new(fb(1), 0b1000, revealed(), fb(9), 100),
+		None
+	);
+	assert_eq!(C5PublicInputs::new(fb(1), 16, revealed(), fb(9), 100), None);
+	assert!(C5PublicInputs::new(fb(1), 0b0111, revealed(), fb(9), 100).is_some());
+}
 
-	let rows = c6.to_elements();
+#[test]
+fn c6_public_inputs_to_elements_has_len_5_in_documented_order() {
+	let rows = C6PublicInputs::new(fb(1), fb(2), fb(7), 100).to_elements();
 
 	assert_eq!(
 		rows.len(),
@@ -140,18 +183,24 @@ fn c6_public_inputs_to_elements_has_len_5_in_documented_order() {
 
 #[test]
 fn every_layout_roundtrips_through_from_elements() {
-	let c1 = C1PublicInputs::new(fb(1), fb(2), 0, revealed(), fb(7), 1);
 	let c2 = C2PublicInputs::new([fb(1), fb(2)], [fb(3), fb(4)], 1, 2, 3, fb(7), 1);
-	let c3 = C3PublicInputs::new(fb(1), fb(2), fb(3), fb(7), 1);
 	let c4 = C4PublicInputs::new(fb(1), fb(2), fb(7), 1);
-	let c5 = C5PublicInputs::new(fb(1), 0, revealed(), fb(9), 1);
 	let c6 = C6PublicInputs::new(fb(1), fb(2), fb(7), 1);
 
-	assert_eq!(C1PublicInputs::from_elements(&c1.to_elements()), Some(c1));
+	assert_eq!(
+		C1PublicInputs::from_elements(&c1(0).to_elements()),
+		Some(c1(0))
+	);
 	assert_eq!(C2PublicInputs::from_elements(&c2.to_elements()), Some(c2));
-	assert_eq!(C3PublicInputs::from_elements(&c3.to_elements()), Some(c3));
+	assert_eq!(
+		C3PublicInputs::from_elements(&c3(0).to_elements()),
+		Some(c3(0))
+	);
 	assert_eq!(C4PublicInputs::from_elements(&c4.to_elements()), Some(c4));
-	assert_eq!(C5PublicInputs::from_elements(&c5.to_elements()), Some(c5));
+	assert_eq!(
+		C5PublicInputs::from_elements(&c5(0).to_elements()),
+		Some(c5(0))
+	);
 	assert_eq!(C6PublicInputs::from_elements(&c6.to_elements()), Some(c6));
 }
 

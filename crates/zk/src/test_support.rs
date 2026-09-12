@@ -77,8 +77,10 @@ pub fn with_flipped_byte(proof: &[u8], index: usize) -> Vec<u8> {
 	out
 }
 
-/// Asserts that perturbing any single public row makes the MockProver reject:
-/// every row is copy-constrained, none is a free instance cell.
+/// Asserts that perturbing any single public row makes the MockProver reject
+/// with a permutation failure: every row is copy-constrained to an advice cell,
+/// none is a free instance cell. (It cannot see whether the row is bound to the
+/// *right* cell; per-circuit semantic negative tests cover that.)
 pub fn assert_every_public_row_is_bound<C: ArxonCircuit>(witness: &C::Witness) {
 	let honest = C::public_from_witness(witness).to_rows();
 	assert_eq!(
@@ -90,10 +92,47 @@ pub fn assert_every_public_row_is_bound<C: ArxonCircuit>(witness: &C::Witness) {
 		let mut tampered = honest.clone();
 		tampered[row] += Fp::ONE;
 		let prover = mock::<C>(witness, tampered);
+		let failures = match prover.verify() {
+			Ok(()) => panic!(
+				"public row {row} of {} is not bound by any constraint",
+				C::NAME
+			),
+			Err(failures) => failures,
+		};
 		assert!(
-			prover.verify().is_err(),
-			"public row {row} of {} is not bound by any constraint",
+			failures.iter().any(|f| matches!(f, VerifyFailure::Permutation { .. })),
+			"public row {row} of {} failed for a reason other than its copy constraint: {failures:#?}",
 			C::NAME
 		);
 	}
+}
+
+/// Asserts the static metadata of `C` agrees with the shared contract: row
+/// count equals the wire layout, one pinned proof length per instance count.
+pub fn assert_circuit_metadata_consistent<C: ArxonCircuit>() {
+	if let Some(id) = C::ID {
+		assert_eq!(
+			C::Public::LEN,
+			id.public_input_len(),
+			"{}: LEN differs from CircuitId::public_input_len",
+			C::NAME
+		);
+		assert_eq!(
+			C::max_instances(),
+			id.max_instances(),
+			"{}: max_instances differs from CircuitId",
+			C::NAME
+		);
+	}
+	assert_eq!(
+		C::PROOF_LENGTHS.len(),
+		C::max_instances() as usize,
+		"{}: one pinned proof length per instance count",
+		C::NAME
+	);
+	assert!(
+		C::PROOF_LENGTHS.iter().all(|l| *l > 0),
+		"{}: every proof length must be pinned",
+		C::NAME
+	);
 }

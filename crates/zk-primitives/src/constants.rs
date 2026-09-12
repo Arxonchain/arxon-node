@@ -4,8 +4,12 @@
 /// carried as a public input. Never 42 (that is the SS58 prefix, not a chain id).
 pub const CHAIN_ID: u64 = 7171;
 
-/// Depth of the note tree and of the trust registry membership tree.
-pub const TREE_DEPTH: usize = 32;
+/// Depth of the note commitment tree (`2^32` notes).
+pub const NOTE_TREE_DEPTH: usize = 32;
+
+/// Depth of the trust registry membership tree (`2^16` regulated counterparties;
+/// shallower than the note tree so Circuit 6 fits a smaller `K`).
+pub const MEMBER_TREE_DEPTH: usize = 16;
 
 /// Hard cap on the size of a single proof, in bytes. Anything larger is rejected
 /// before the transcript is touched (DoS bound). The product target per single
@@ -13,8 +17,9 @@ pub const TREE_DEPTH: usize = 32;
 pub const MAX_PROOF_BYTES: u32 = 8192;
 
 /// Maximum number of instances (input notes for Circuit 3, output notes for
-/// Circuit 1) folded into one proof.
-pub const MAX_INSTANCES: u32 = 4;
+/// Circuit 1) folded into one proof. Equal to Circuit 2's fixed arity: a
+/// bundle with more inputs or outputs could never be balanced.
+pub const MAX_INSTANCES: u32 = 2;
 
 /// Maximum number of public input rows per instance, for any circuit.
 pub const MAX_PUBLIC_INPUTS: u32 = 16;
@@ -39,8 +44,11 @@ pub const PALLAS_BASE_MODULUS_LE: [u8; 32] = [
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40,
 ];
 
-/// Poseidon domain tags. Every hash is `Poseidon(tag, m_1, ..., m_L)` with a
-/// `ConstantLength<L + 1>` sponge, so messages of different purpose never collide.
+/// Poseidon domain tags. Every Arxon hash of an `L`-word message runs the
+/// sponge with initial capacity element `(L << 64) | tag` (see
+/// `poseidon::ArxonDomain`), so messages of different purpose or length never
+/// share a permutation, and no Arxon domain collides with a plain
+/// `ConstantLength<L>` (whose low 64 capacity bits are zero). Tags are never 0.
 pub mod tags {
 	/// `pk = H(sk)`.
 	pub const PK: u64 = 1;

@@ -1,48 +1,144 @@
 use ff::{Field, PrimeField};
-use halo2_poseidon::{ConstantLength, Hash, P128Pow5T3};
+use halo2_poseidon::{ConstantLength, Domain, Hash, P128Pow5T3};
 
 use crate::{
 	constants::tags,
 	poseidon::{
-		cv_dummy, fp_from_bytes, fp_to_bytes, hash_cv, hash_member_leaf, hash_merkle_member,
-		hash_merkle_note, hash_nk, hash_note, hash_nullifier, hash_pk, hash_ptr, hash_two_bytes,
-		Fp, MerkleDomain,
+		cv_dummy, fp_from_bytes, fp_to_bytes, hash_cv, hash_domain, hash_member_leaf,
+		hash_merkle_member, hash_merkle_note, hash_nk, hash_note, hash_nullifier, hash_pk,
+		hash_ptr, hash_two_bytes, sponge_hash, ArxonDomain, Fp, MerkleDomain, RATE,
 	},
 	FieldBytes, PALLAS_BASE_MODULUS_LE,
 };
 
-fn untagged2(a: Fp, b: Fp) -> Fp {
-	Hash::<Fp, P128Pow5T3, ConstantLength<2>, 3, 2>::init().hash([a, b])
+fn upstream<const L: usize>(msg: [Fp; L]) -> Fp {
+	Hash::<Fp, P128Pow5T3, ConstantLength<L>, 3, 2>::init().hash(msg)
+}
+
+fn sample(n: u64) -> Fp {
+	// Deterministic, non-trivial field elements.
+	Fp::from(n) * Fp::from(0x9e37_79b9_7f4a_7c15) + Fp::from(7)
+}
+
+// --- the native port equals upstream on the plain domain ---------------------------------------
+
+#[test]
+fn ported_sponge_equals_upstream_constant_length_hash_for_lengths_1_to_5() {
+	assert_eq!(
+		sponge_hash::<ConstantLength<1>>(&[sample(1)]),
+		upstream([sample(1)])
+	);
+	assert_eq!(
+		sponge_hash::<ConstantLength<2>>(&[sample(1), sample(2)]),
+		upstream([sample(1), sample(2)])
+	);
+	assert_eq!(
+		sponge_hash::<ConstantLength<3>>(&[sample(1), sample(2), sample(3)]),
+		upstream([sample(1), sample(2), sample(3)])
+	);
+	assert_eq!(
+		sponge_hash::<ConstantLength<4>>(&[sample(1), sample(2), sample(3), sample(4)]),
+		upstream([sample(1), sample(2), sample(3), sample(4)])
+	);
+	assert_eq!(
+		sponge_hash::<ConstantLength<5>>(&[sample(1), sample(2), sample(3), sample(4), sample(5)]),
+		upstream([sample(1), sample(2), sample(3), sample(4), sample(5)])
+	);
 }
 
 #[test]
-fn tagged_hash_is_plain_poseidon_with_the_tag_prepended() {
-	let sk = Fp::from(7);
+fn arxon_domain_with_tag_zero_is_exactly_constant_length() {
+	// Tag 0 is never used by Arxon; it shows the domain differs from upstream only by the tag bits.
+	assert_eq!(
+		hash_domain::<0, 2>([sample(1), sample(2)]),
+		upstream([sample(1), sample(2)])
+	);
+	assert_eq!(
+		<ArxonDomain<0, 2> as Domain<Fp, RATE>>::initial_capacity_element(),
+		<ConstantLength<2> as Domain<Fp, RATE>>::initial_capacity_element()
+	);
+}
 
-	assert_eq!(hash_pk(sk), untagged2(Fp::from(tags::PK), sk));
-	assert_eq!(hash_nk(sk), untagged2(Fp::from(tags::NK), sk));
+#[test]
+fn poseidon_upstream_kat_h_zero_one_is_reproduced_by_the_port() {
+	// First vector of halo2_poseidon `test_vectors::fp` (zcash-test-vectors orchard_poseidon/hash/fp.py).
+	let expected: [u8; 32] = [
+		0x83, 0x58, 0xd7, 0x11, 0xa0, 0x32, 0x9d, 0x38, 0xbe, 0xcd, 0x54, 0xfb, 0xa7, 0xc2, 0x83,
+		0xed, 0x3e, 0x08, 0x9a, 0x39, 0xc9, 0x1b, 0x6a, 0x9d, 0x10, 0xef, 0xb0, 0x2b, 0xc3, 0xf1,
+		0x2f, 0x06,
+	];
+
+	let digest = sponge_hash::<ConstantLength<2>>(&[Fp::ZERO, Fp::ONE]);
+
+	assert_eq!(digest.to_repr(), expected);
+}
+
+// --- domain separation ----------------------------------------------------------------------------
+
+#[test]
+fn arxon_domain_capacity_encodes_length_and_tag() {
+	let cap = <ArxonDomain<{ tags::CV }, 2> as Domain<Fp, RATE>>::initial_capacity_element();
+
+	assert_eq!(cap, Fp::from_u128((2u128 << 64) | tags::CV as u128));
+}
+
+#[test]
+fn every_arxon_tag_is_non_zero_and_distinct() {
+	let all = [
+		tags::PK,
+		tags::NK,
+		tags::NOTE,
+		tags::NULLIFIER,
+		tags::PTR,
+		tags::MERKLE_NOTE,
+		tags::MERKLE_MEMBER,
+		tags::MEMBER_LEAF,
+		tags::CV,
+	];
+
+	for (i, a) in all.iter().enumerate() {
+		assert_ne!(*a, 0);
+		for b in &all[i + 1..] {
+			assert_ne!(a, b);
+		}
+	}
+}
+
+#[test]
+fn arxon_hash_never_equals_upstream_hash_of_the_same_message() {
+	let msg = [sample(1), sample(2)];
+
+	assert_ne!(hash_merkle_note(msg[0], msg[1]), upstream(msg));
+	assert_ne!(hash_cv(5, sample(2)), upstream([Fp::from(5), sample(2)]));
 }
 
 #[test]
 fn pk_and_nk_of_the_same_secret_differ() {
-	let sk = Fp::from(7);
-
-	assert_ne!(hash_pk(sk), hash_nk(sk));
+	assert_ne!(hash_pk(sample(1)), hash_nk(sample(1)));
 }
 
 #[test]
 fn note_and_member_merkle_domains_differ_on_the_same_children() {
-	let (l, r) = (Fp::from(1), Fp::from(2));
-
-	assert_ne!(hash_merkle_note(l, r), hash_merkle_member(l, r));
+	assert_ne!(
+		hash_merkle_note(sample(1), sample(2)),
+		hash_merkle_member(sample(1), sample(2))
+	);
 }
 
 #[test]
 fn merkle_hash_is_not_symmetric() {
-	let (l, r) = (Fp::from(1), Fp::from(2));
-
-	assert_ne!(hash_merkle_note(l, r), hash_merkle_note(r, l));
+	assert_ne!(
+		hash_merkle_note(sample(1), sample(2)),
+		hash_merkle_note(sample(2), sample(1))
+	);
 }
+
+#[test]
+fn member_leaf_differs_from_pk_hash_of_the_same_key() {
+	assert_ne!(hash_member_leaf(sample(3)), hash_pk(sample(3)));
+}
+
+// --- Arxon hash functions -------------------------------------------------------------------------
 
 #[test]
 fn cv_dummy_is_h_cv_of_zero_zero() {
@@ -94,11 +190,22 @@ fn ptr_id_depends_on_every_field_and_on_party_order() {
 }
 
 #[test]
-fn member_leaf_differs_from_pk_hash_of_the_same_key() {
-	let pk = Fp::from(11);
-
-	assert_ne!(hash_member_leaf(pk), hash_pk(pk));
+fn named_hashes_are_the_generic_domain_hash_with_their_tag() {
+	assert_eq!(
+		hash_pk(sample(1)),
+		hash_domain::<{ tags::PK }, 1>([sample(1)])
+	);
+	assert_eq!(
+		hash_nullifier(sample(1), sample(2)),
+		hash_domain::<{ tags::NULLIFIER }, 2>([sample(1), sample(2)])
+	);
+	assert_eq!(
+		hash_note(sample(1), 9, sample(3)),
+		hash_domain::<{ tags::NOTE }, 3>([sample(1), Fp::from(9), sample(3)])
+	);
 }
+
+// --- bytes ----------------------------------------------------------------------------------------
 
 #[test]
 fn fp_bytes_roundtrip_is_canonical_little_endian() {
@@ -133,7 +240,7 @@ fn is_canonical_agrees_with_field_decoding_on_boundary_values() {
 
 #[test]
 fn hash_two_bytes_matches_field_level_hash() {
-	let (l, r) = (Fp::from(1), Fp::from(2));
+	let (l, r) = (sample(1), sample(2));
 
 	let out = hash_two_bytes(MerkleDomain::Note, &fp_to_bytes(&l), &fp_to_bytes(&r));
 
@@ -165,31 +272,4 @@ fn poseidon_spec_is_width3_rate2_8_full_56_partial() {
 		Fp::from(32),
 		"alpha 5"
 	);
-}
-
-#[test]
-fn poseidon_upstream_kat_h_zero_one_is_reproduced() {
-	// First vector of halo2_poseidon `test_vectors::fp` (zcash-test-vectors orchard_poseidon/hash/fp.py):
-	// ConstantLength<2> hash of [0, 1].
-	let expected: [u8; 32] = [
-		0x83, 0x58, 0xd7, 0x11, 0xa0, 0x32, 0x9d, 0x38, 0xbe, 0xcd, 0x54, 0xfb, 0xa7, 0xc2, 0x83,
-		0xed, 0x3e, 0x08, 0x9a, 0x39, 0xc9, 0x1b, 0x6a, 0x9d, 0x10, 0xef, 0xb0, 0x2b, 0xc3, 0xf1,
-		0x2f, 0x06,
-	];
-
-	let digest = untagged2(Fp::ZERO, Fp::ONE);
-
-	assert_eq!(digest.to_repr(), expected);
-}
-
-#[test]
-fn tagged_hash_with_tag_zero_and_one_message_equals_upstream_kat() {
-	// A tagged L=1 hash is exactly the upstream ConstantLength<2> hash of [tag, m]:
-	// with tag 0 and m = 1 it must reproduce the first upstream vector.
-	let expected = untagged2(Fp::ZERO, Fp::ONE);
-
-	let digest =
-		Hash::<Fp, P128Pow5T3, ConstantLength<2>, 3, 2>::init().hash([Fp::from(0u64), Fp::ONE]);
-
-	assert_eq!(digest, expected);
 }

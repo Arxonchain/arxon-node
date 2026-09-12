@@ -29,6 +29,9 @@ pub struct BundleFields<'a> {
 	pub transparent_in: u64,
 	/// Transparent value leaving the pool (unshield), in shielded units.
 	pub transparent_out: u64,
+	/// In-circuit fee (Circuit 2 row), in shielded units. Zero in v1, committed anyway
+	/// so a shielded fee later is not a digest change.
+	pub fee: u64,
 	/// Nullifiers of the spent notes, in bundle order.
 	pub nullifiers: &'a [FieldBytes],
 	/// Commitments of the created notes, in bundle order.
@@ -52,6 +55,7 @@ impl BundleFields<'_> {
 		self.recipient.encode_to(&mut out);
 		self.transparent_in.encode_to(&mut out);
 		self.transparent_out.encode_to(&mut out);
+		self.fee.encode_to(&mut out);
 		self.nullifiers.encode_to(&mut out);
 		self.commitments.encode_to(&mut out);
 		self.cv_inputs.encode_to(&mut out);

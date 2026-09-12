@@ -11,6 +11,7 @@ fn base<'a>(nullifiers: &'a [FieldBytes], commitments: &'a [FieldBytes]) -> Bund
 		recipient: None,
 		transparent_in: 10,
 		transparent_out: 0,
+		fee: 0,
 		nullifiers,
 		commitments,
 		cv_inputs: &[],
@@ -56,6 +57,35 @@ fn bundle_digest_changes_when_transparent_out_changes() {
 	let a = base(&[], &[]);
 	let mut b = a.clone();
 	b.transparent_out = 1;
+
+	assert_ne!(bundle_digest(&a), bundle_digest(&b));
+}
+
+#[test]
+fn bundle_digest_changes_when_fee_changes() {
+	let a = base(&[], &[]);
+	let mut b = a.clone();
+	b.fee = 1;
+
+	assert_ne!(bundle_digest(&a), bundle_digest(&b));
+}
+
+#[test]
+fn bundle_digest_distinguishes_no_recipient_from_empty_recipient() {
+	let a = base(&[], &[]);
+	let mut b = a.clone();
+	b.recipient = Some(&[]);
+
+	assert_ne!(bundle_digest(&a), bundle_digest(&b));
+}
+
+#[test]
+fn bundle_digest_distinguishes_cv_input_from_cv_output_position() {
+	let x = [fb(4)];
+	let mut a = base(&[], &[]);
+	a.cv_inputs = &x;
+	let mut b = base(&[], &[]);
+	b.cv_outputs = &x;
 
 	assert_ne!(bundle_digest(&a), bundle_digest(&b));
 }

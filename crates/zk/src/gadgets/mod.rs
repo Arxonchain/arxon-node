@@ -3,6 +3,13 @@
 //! Every gadget owns its selectors and lookup tables but borrows advice and
 //! fixed columns from a [`SharedColumns`] pool, so circuits stay narrow (proof
 //! size grows with columns, not with rows).
+//!
+//! Invariant: the layout of every gadget (which rows get which selectors) must
+//! not depend on witness values. halo2 compresses selectors from the
+//! witness-less circuit used at key generation; a circuit that branched on a
+//! `Value` would prove against a layout its verifying key never saw.
+//! Prover-side computations must therefore live inside `Value::map`, never in
+//! control flow.
 
 pub mod binding;
 pub mod mask;

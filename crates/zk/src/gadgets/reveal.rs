@@ -4,6 +4,9 @@
 //! `(1 - hide) * (value - revealed) = 0` and `hide * revealed = 0`.
 //! Shown fields must equal the value; hidden fields must be exposed as zero,
 //! so a prover cannot leak a value into a "hidden" slot either.
+//!
+//! The production entry point takes a [`MaskBit`], a cell only the mask lookup
+//! can produce, so the bit driving the gate is the bit of the published mask.
 
 use halo2_proofs::{
 	circuit::{AssignedCell, Layouter, Value},
@@ -11,7 +14,7 @@ use halo2_proofs::{
 	poly::Rotation,
 };
 
-use super::SharedColumns;
+use super::{mask::MaskBit, SharedColumns};
 use crate::field::Fp;
 
 /// Reveal gate configuration.
@@ -48,23 +51,36 @@ impl RevealConfig {
 		}
 	}
 
-	/// Returns the `revealed` cell for `value` under `hide` (both copied in);
-	/// the caller exposes it as a public row.
+	/// Returns the `revealed` cell for `value` under `hide`; the caller exposes
+	/// it as a public row.
 	pub fn reveal(
 		&self,
 		layouter: &mut impl Layouter<Fp>,
-		hide: &AssignedCell<Fp, Fp>,
+		hide: &MaskBit,
 		value: &AssignedCell<Fp, Fp>,
 	) -> Result<AssignedCell<Fp, Fp>, Error> {
+		let hide = hide.cell();
 		let revealed =
 			hide.value()
 				.zip(value.value())
 				.map(|(h, v)| if *h == Fp::from(1) { Fp::from(0) } else { *v });
-		self.reveal_raw(layouter, hide, value, revealed)
+		self.reveal_cells(layouter, hide, value, revealed)
 	}
 
-	/// Like [`Self::reveal`] with a caller-chosen `revealed` witness; only the gate keeps it honest.
+	/// Gate-level access with an arbitrary `hide` cell and a caller-chosen
+	/// `revealed` witness. Tests only: production circuits go through [`Self::reveal`].
+	#[cfg(test)]
 	pub fn reveal_raw(
+		&self,
+		layouter: &mut impl Layouter<Fp>,
+		hide: &AssignedCell<Fp, Fp>,
+		value: &AssignedCell<Fp, Fp>,
+		revealed: Value<Fp>,
+	) -> Result<AssignedCell<Fp, Fp>, Error> {
+		self.reveal_cells(layouter, hide, value, revealed)
+	}
+
+	fn reveal_cells(
 		&self,
 		layouter: &mut impl Layouter<Fp>,
 		hide: &AssignedCell<Fp, Fp>,

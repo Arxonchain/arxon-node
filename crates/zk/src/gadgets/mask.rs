@@ -15,13 +15,48 @@ use halo2_proofs::{
 use super::SharedColumns;
 use crate::field::Fp;
 
+/// One bit of a mask that went through the lookup. The field is private so a
+/// circuit cannot feed the reveal gate a bit that was never proven to belong to
+/// the exposed mask: only this module can build one.
+#[derive(Clone, Debug)]
+pub struct MaskBit(AssignedCell<Fp, Fp>);
+
+impl MaskBit {
+	/// The underlying cell (read-only).
+	pub fn cell(&self) -> &AssignedCell<Fp, Fp> {
+		&self.0
+	}
+}
+
 /// A mask and its four bits as assigned cells.
 #[derive(Clone, Debug)]
 pub struct MaskBits {
 	/// The mask as a field element.
 	pub mask: AssignedCell<Fp, Fp>,
 	/// `[hide_sender, hide_receiver, hide_amount, hide_balance]`.
-	pub bits: [AssignedCell<Fp, Fp>; 4],
+	pub bits: [MaskBit; 4],
+}
+
+impl MaskBits {
+	/// `hide_sender`.
+	pub fn hide_sender(&self) -> &MaskBit {
+		&self.bits[0]
+	}
+
+	/// `hide_receiver`.
+	pub fn hide_receiver(&self) -> &MaskBit {
+		&self.bits[1]
+	}
+
+	/// `hide_amount`.
+	pub fn hide_amount(&self) -> &MaskBit {
+		&self.bits[2]
+	}
+
+	/// `hide_balance`.
+	pub fn hide_balance(&self) -> &MaskBit {
+		&self.bits[3]
+	}
 }
 
 /// Mask lookup configuration.
@@ -115,7 +150,12 @@ impl MaskConfig {
 						|| *value,
 					)?);
 				}
-				let bits: [AssignedCell<Fp, Fp>; 4] = cells.try_into().expect("four bits");
+				let bits: [MaskBit; 4] = cells
+					.into_iter()
+					.map(MaskBit)
+					.collect::<Vec<_>>()
+					.try_into()
+					.expect("four bits");
 				Ok(MaskBits {
 					mask: mask_cell,
 					bits,

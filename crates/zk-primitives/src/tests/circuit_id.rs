@@ -1,6 +1,6 @@
 use scale_codec::{Decode, Encode};
 
-use crate::{CircuitId, MAX_INSTANCES};
+use crate::{CircuitId, C2_INPUTS, C2_OUTPUTS, MAX_INSTANCES};
 
 #[test]
 fn circuit_id_roundtrips_through_u8_for_all_variants() {
@@ -46,6 +46,12 @@ fn circuit_id_index_is_zero_based_and_dense() {
 	let indices: alloc::vec::Vec<usize> = CircuitId::ALL.iter().map(|id| id.index()).collect();
 
 	assert_eq!(indices, alloc::vec![0, 1, 2, 3, 4, 5]);
+}
+
+#[test]
+fn max_instances_equals_circuit_2_arity() {
+	assert_eq!(MAX_INSTANCES as usize, C2_INPUTS);
+	assert_eq!(MAX_INSTANCES as usize, C2_OUTPUTS);
 }
 
 #[test]

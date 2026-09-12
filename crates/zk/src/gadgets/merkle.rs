@@ -1,10 +1,9 @@
-//! Depth-32 Merkle inclusion path over tagged Poseidon.
+//! Merkle inclusion path over Arxon-domain Poseidon, generic in depth.
 //!
 //! Per level, with `bit` the position bit (0: current node is the left child):
 //! `bit * (bit - 1) = 0`, `left = cur + bit * (sib - cur)`, `right = sib + bit * (cur - sib)`,
-//! then `next = H_tag(left, right)`.
+//! then `next = H_TAG(left, right)` (one permutation per level).
 
-use arxon_zk_primitives::TREE_DEPTH;
 use halo2_proofs::{
 	circuit::{AssignedCell, Layouter, Value},
 	plonk::{ConstraintSystem, Constraints, Error, Expression, Selector},
@@ -14,16 +13,16 @@ use halo2_proofs::{
 use super::{poseidon::PoseidonConfig, SharedColumns};
 use crate::field::Fp;
 
-/// A Merkle authentication path.
+/// A Merkle authentication path of depth `D`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MerklePath {
+pub struct MerklePath<const D: usize> {
 	/// Sibling at each level, leaf level first.
-	pub siblings: [Fp; TREE_DEPTH],
+	pub siblings: [Fp; D],
 	/// Position bit at each level, leaf level first (`true` = current node is the right child).
-	pub bits: [bool; TREE_DEPTH],
+	pub bits: [bool; D],
 }
 
-impl MerklePath {
+impl<const D: usize> MerklePath<D> {
 	/// Leaf index encoded by the position bits.
 	pub fn leaf_index(&self) -> u64 {
 		self.bits
@@ -36,15 +35,15 @@ impl MerklePath {
 /// The path as the circuit witnesses it: position bits are field elements, so
 /// tests can feed a non-boolean bit and watch the boolean gate reject it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PathWitness {
+pub struct PathWitness<const D: usize> {
 	/// Sibling at each level, leaf level first.
-	pub siblings: [Fp; TREE_DEPTH],
+	pub siblings: [Fp; D],
 	/// Position bit at each level as `0` or `1`.
-	pub bits: [Fp; TREE_DEPTH],
+	pub bits: [Fp; D],
 }
 
-impl From<&MerklePath> for PathWitness {
-	fn from(path: &MerklePath) -> Self {
+impl<const D: usize> From<&MerklePath<D>> for PathWitness<D> {
+	fn from(path: &MerklePath<D>) -> Self {
 		PathWitness {
 			siblings: path.siblings,
 			bits: path.bits.map(Fp::from),
@@ -95,16 +94,15 @@ impl MerkleConfig {
 		}
 	}
 
-	/// Computes the root from `leaf` along `path`, hashing nodes with `tag`.
-	pub fn root(
+	/// Computes the depth-`D` root from `leaf` along `path`, hashing nodes under `TAG`.
+	pub fn root<const TAG: u64, const D: usize>(
 		&self,
 		layouter: &mut impl Layouter<Fp>,
-		tag: u64,
 		leaf: AssignedCell<Fp, Fp>,
-		path: Value<&PathWitness>,
+		path: Value<&PathWitness<D>>,
 	) -> Result<AssignedCell<Fp, Fp>, Error> {
 		let mut cur = leaf;
-		for level in 0..TREE_DEPTH {
+		for level in 0..D {
 			let sib = path.map(|p| p.siblings[level]);
 			let bit = path.map(|p| p.bits[level]);
 			let (left, right) = layouter.assign_region(
@@ -136,11 +134,9 @@ impl MerkleConfig {
 					Ok((left, right))
 				},
 			)?;
-			cur = self.poseidon.hash_tagged_2(
+			cur = self.poseidon.hash_domain::<TAG, 2>(
 				layouter.namespace(|| format!("merkle hash {level}")),
-				tag,
-				left,
-				right,
+				[left, right],
 			)?;
 		}
 		Ok(cur)

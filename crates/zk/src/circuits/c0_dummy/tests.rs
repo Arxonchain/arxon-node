@@ -65,6 +65,11 @@ fn dummy_every_public_row_is_bound() {
 	assert_every_public_row_is_bound::<DummyCircuit>(&witness());
 }
 
+#[test]
+fn dummy_metadata_is_consistent() {
+	assert_circuit_metadata_consistent::<DummyCircuit>();
+}
+
 // --- Real proofs -------------------------------------------------------------------------------
 
 #[test]

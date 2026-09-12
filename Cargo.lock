@@ -626,6 +626,7 @@ dependencies = [
 name = "arxon-runtime"
 version = "0.0.0"
 dependencies = [
+ "arxon-zk",
  "arxon-zk-primitives",
  "arxon-zk-runtime-api",
  "cumulus-pallet-weight-reclaim",
@@ -649,6 +650,7 @@ dependencies = [
  "pallet-ethereum",
  "pallet-evm",
  "pallet-evm-chain-id",
+ "pallet-evm-precompile-arxon-zk",
  "pallet-evm-precompile-curve25519",
  "pallet-evm-precompile-curve25519-benchmarking",
  "pallet-evm-precompile-modexp",
@@ -670,6 +672,7 @@ dependencies = [
  "pallet-zk-verifier",
  "parity-scale-codec",
  "polkadot-runtime-common",
+ "rand_core 0.6.4",
  "scale-info",
  "serde_json",
  "sp-api",
@@ -679,6 +682,7 @@ dependencies = [
  "sp-core",
  "sp-genesis-builder",
  "sp-inherents",
+ "sp-io",
  "sp-offchain",
  "sp-runtime",
  "sp-session",
@@ -6778,6 +6782,7 @@ dependencies = [
  "ctutils",
  "hybrid-array",
  "module-lattice",
+ "pkcs8 0.11.0",
  "shake",
  "signature 3.0.0",
 ]
@@ -7717,6 +7722,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-evm-precompile-arxon-zk"
+version = "0.1.0"
+dependencies = [
+ "arxon-zk-primitives",
+ "fp-evm",
+ "frame-support",
+ "frame-system",
+ "pallet-balances",
+ "pallet-evm",
+ "pallet-note-tree",
+ "pallet-nullifier-registry",
+ "pallet-timestamp",
+ "pallet-zk-verifier",
+ "parity-scale-codec",
+ "precompile-utils",
+ "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+]
+
+[[package]]
 name = "pallet-evm-precompile-blake2"
 version = "2.0.0-dev"
 dependencies = [
@@ -8018,24 +8045,38 @@ dependencies = [
 
 [[package]]
 name = "pallet-privacy"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "arxon-zk-primitives",
  "frame-benchmarking",
  "frame-support",
  "frame-system",
+ "pallet-balances",
+ "pallet-note-tree",
+ "pallet-nullifier-registry",
+ "pallet-zk-verifier",
  "parity-scale-codec",
  "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
 ]
 
 [[package]]
 name = "pallet-ptr"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "arxon-zk-primitives",
  "frame-benchmarking",
  "frame-support",
  "frame-system",
+ "pallet-privacy",
+ "pallet-zk-verifier",
  "parity-scale-codec",
  "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
 ]
 
 [[package]]
@@ -8048,6 +8089,8 @@ dependencies = [
  "ml-dsa",
  "parity-scale-codec",
  "scale-info",
+ "sp-core",
+ "sp-io",
  "sp-runtime",
 ]
 

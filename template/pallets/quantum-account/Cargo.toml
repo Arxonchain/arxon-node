@@ -22,6 +22,11 @@ sp-runtime = { workspace = true }
 # ML-DSA-65 — NIST FIPS 204 post-quantum signatures (no_std compatible)
 ml-dsa = { version = "0.1.0-rc.8", default-features = false }
 
+[dev-dependencies]
+ml-dsa = { version = "0.1.0-rc.8", default-features = false, features = ["alloc"] }
+sp-core = { workspace = true, features = ["default"] }
+sp-io = { workspace = true, features = ["default"] }
+
 [features]
 default = ["std"]
 std = [

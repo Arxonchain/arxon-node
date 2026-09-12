@@ -4,6 +4,11 @@ extern crate alloc;
 
 pub use pallet::*;
 
+#[cfg(test)]
+mod mock;
+#[cfg(test)]
+mod tests;
+
 pub const MLDSA65_PK_LEN: u32 = 1952;
 pub const MLDSA65_SIG_LEN: u32 = 3309;
 pub const ARXON_QUANTUM_DOMAIN: &[u8] = b"arxon-quantum-dispatch-v1";

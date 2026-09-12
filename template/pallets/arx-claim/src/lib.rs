@@ -6,8 +6,6 @@ pub mod pallet {
     use frame_support::traits::Currency;
     use frame_system::pallet_prelude::*;
 
-    type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
-
     #[pallet::pallet]
     pub struct Pallet<T>(_);
 

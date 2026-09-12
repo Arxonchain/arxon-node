@@ -1,0 +1,19 @@
+[package]
+name = "arxon-zk-runtime-api"
+version = "0.1.0"
+license = "Unlicense"
+description = "Runtime API exposing the Arxon shielded pool state (tree roots, nullifiers, circuit switches) to RPC clients."
+authors = { workspace = true }
+edition = { workspace = true }
+repository = { workspace = true }
+publish = false
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+sp-api = { workspace = true }
+
+[features]
+default = ["std"]
+std = ["sp-api/std"]

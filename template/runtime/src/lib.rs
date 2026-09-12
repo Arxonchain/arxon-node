@@ -184,10 +184,10 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: Cow::Borrowed("arxon"),
 	impl_name: Cow::Borrowed("arxon"),
 	authoring_version: 1,
-	spec_version: 1,
+	spec_version: 2,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
-	transaction_version: 1,
+	transaction_version: 2,
 	system_version: 1,
 };
 
@@ -536,8 +536,16 @@ mod runtime {
 	#[runtime::pallet_index(17)]
 	pub type QuantumAccount = pallet_quantum_account;
 
-	// Reserved for ZK. Do not assign other pallets these indices:
-	// 18 verifier, 19 nullifier registry, 20 note / membership tree (not index 16).
+	// ZK selective privacy layer. Index 16 stays anti-rug, 17 stays quantum accounts.
+	#[runtime::pallet_index(18)]
+	pub type ZkVerifier = pallet_zk_verifier;
+
+	#[runtime::pallet_index(19)]
+	pub type NullifierRegistry = pallet_nullifier_registry;
+
+	// One pallet, two trees (TreeId::Note, TreeId::Membership).
+	#[runtime::pallet_index(20)]
+	pub type NoteTree = pallet_note_tree;
 }
 
 #[derive(Clone)]
@@ -1062,6 +1070,39 @@ impl_runtime_apis! {
 		}
 	}
 
+	impl arxon_zk_runtime_api::ArxonZkApi<Block> for Runtime {
+		fn note_tree_root() -> [u8; 32] {
+			NoteTree::root(pallet_note_tree::TreeId::Note).0
+		}
+
+		fn membership_root() -> [u8; 32] {
+			NoteTree::root(pallet_note_tree::TreeId::Membership).0
+		}
+
+		fn is_known_note_root(root: [u8; 32]) -> bool {
+			NoteTree::known_root(pallet_note_tree::TreeId::Note, &arxon_zk_primitives::FieldBytes(root))
+		}
+
+		fn is_nullifier_spent(nullifier: [u8; 32]) -> bool {
+			NullifierRegistry::is_spent(&arxon_zk_primitives::FieldBytes(nullifier))
+		}
+
+		fn leaf_count(tree: u8) -> u64 {
+			match tree {
+				0 => NoteTree::leaf_count(pallet_note_tree::TreeId::Note),
+				1 => NoteTree::leaf_count(pallet_note_tree::TreeId::Membership),
+				_ => 0,
+			}
+		}
+
+		fn circuit_enabled(circuit_id: u8) -> bool {
+			arxon_zk_primitives::CircuitId::try_from(circuit_id)
+				.ok()
+				.and_then(ZkVerifier::circuit)
+				.is_some_and(|c| c.enabled)
+		}
+	}
+
 	#[cfg(feature = "runtime-benchmarks")]
 	impl frame_benchmarking::Benchmark<Block> for Runtime {
 		fn benchmark_metadata(extra: bool) -> (
@@ -1113,7 +1154,13 @@ impl_runtime_apis! {
 
 #[cfg(test)]
 mod tests {
-	use super::{Runtime, WeightPerGas};
+	use super::{Runtime, WeightPerGas, ARXON_EVM_CHAIN_ID};
+
+	#[test]
+	fn zk_chain_id_constant_matches_evm_chain_id() {
+		assert_eq!(arxon_zk_primitives::CHAIN_ID, ARXON_EVM_CHAIN_ID);
+	}
+
 	#[test]
 	fn configured_base_extrinsic_weight_is_evm_compatible() {
 		let min_ethereum_transaction_weight = WeightPerGas::get() * 21_000;
@@ -1158,4 +1205,19 @@ impl pallet_trust_registry::Config for Runtime {
 impl pallet_quantum_account::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type RuntimeCall = RuntimeCall;
+}
+
+impl pallet_zk_verifier::Config for Runtime {
+	type Verifier = pallet_zk_verifier::HostVerifier;
+	type AdminOrigin = frame_system::EnsureRoot<AccountId>;
+	type WeightInfo = ();
+}
+
+impl pallet_nullifier_registry::Config for Runtime {}
+
+impl pallet_note_tree::Config for Runtime {
+	type Hasher = pallet_note_tree::PoseidonHasher;
+	// Anchors stay valid for this many inserts (not blocks); sized for the expected note rate.
+	type RootHistorySize = ConstU32<1024>;
+	type WeightInfo = ();
 }

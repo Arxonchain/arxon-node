@@ -114,6 +114,8 @@ fn testnet_genesis(
 			key: Some(sudo_key),
 		},
 		transaction_payment: Default::default(),
+		// Every circuit registered with its frozen verifying key hash, enabled.
+		zk_verifier: Default::default(),
 	};
 
 	serde_json::to_value(&config).expect("Could not build genesis config.")

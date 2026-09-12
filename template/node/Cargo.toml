@@ -66,6 +66,10 @@ frame-system = { workspace = true }
 pallet-transaction-payment = { workspace = true }
 
 # Frontier
+arxon-runtime = { workspace = true, features = ["std"] }
+arxon-zk = { workspace = true }
+arxon-zk-host = { workspace = true, features = ["std"] }
+arxon-zk-runtime-api = { workspace = true, features = ["std"] }
 fc-api = { workspace = true }
 fc-cli = { workspace = true }
 fc-consensus = { workspace = true }
@@ -78,7 +82,6 @@ fp-account = { workspace = true }
 fp-dynamic-fee = { workspace = true, features = ["default"] }
 fp-evm = { workspace = true, features = ["default"] }
 fp-rpc = { workspace = true, features = ["default"] }
-arxon-runtime = { workspace = true, features = ["std"] }
 
 # Cumulus primitives
 cumulus-primitives-proof-size-hostfunction = { workspace = true }

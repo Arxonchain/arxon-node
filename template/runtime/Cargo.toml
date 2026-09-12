@@ -71,7 +71,13 @@ pallet-mining = { workspace = true }
 pallet-privacy = { workspace = true }
 pallet-ptr = { workspace = true }
 pallet-quantum-account = { workspace = true }
+# Arxon ZK
+arxon-zk-primitives = { workspace = true }
+arxon-zk-runtime-api = { workspace = true }
+pallet-note-tree = { workspace = true }
+pallet-nullifier-registry = { workspace = true }
 pallet-trust-registry = { workspace = true }
+pallet-zk-verifier = { workspace = true }
 
 # Polkadot
 polkadot-runtime-common = { workspace = true }
@@ -146,6 +152,12 @@ std = [
 	"pallet-ptr/std",
 	"pallet-trust-registry/std",
 	"pallet-quantum-account/std",
+	# Arxon ZK
+	"arxon-zk-primitives/std",
+	"arxon-zk-runtime-api/std",
+	"pallet-note-tree/std",
+	"pallet-nullifier-registry/std",
+	"pallet-zk-verifier/std",
 ]
 runtime-benchmarks = [
 	"frame-benchmarking/runtime-benchmarks",
@@ -166,4 +178,7 @@ runtime-benchmarks = [
 	"pallet-ptr/runtime-benchmarks",
 	"pallet-trust-registry/runtime-benchmarks",
 	"pallet-quantum-account/runtime-benchmarks",
+	"pallet-note-tree/runtime-benchmarks",
+	"pallet-nullifier-registry/runtime-benchmarks",
+	"pallet-zk-verifier/runtime-benchmarks",
 ]

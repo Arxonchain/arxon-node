@@ -56,6 +56,7 @@ members = [
 	"template/pallets/note-tree",
 	"template/pallets/zk-verifier",
 	"template/primitives/zk-host",
+	"template/primitives/zk-runtime-api",
 ]
 resolver = "2"
 

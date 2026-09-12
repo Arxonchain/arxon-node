@@ -40,12 +40,14 @@ pub type HostFunctions = (
 	sp_io::SubstrateHostFunctions,
 	frame_benchmarking::benchmarking::HostFunctions,
 	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
+	arxon_zk_host::HostFunctions,
 );
 /// Otherwise we use empty host functions for ext host functions.
 #[cfg(not(feature = "runtime-benchmarks"))]
 pub type HostFunctions = (
 	sp_io::SubstrateHostFunctions,
 	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
+	arxon_zk_host::HostFunctions,
 );
 
 pub type Backend = FullBackend<Block>;
@@ -116,6 +118,14 @@ where
 			executor,
 			true,
 		)?;
+
+	// Halo2 proving and verifying keys are derived deterministically on first
+	// use; build them now so the first block carrying a proof does not pay for it.
+	task_manager.spawn_handle().spawn_blocking(
+		"arxon-zk-warm-up",
+		None,
+		async { arxon_zk::key_cache::warm_up() },
+	);
 	let client = Arc::new(client);
 
 	let telemetry = telemetry.map(|(worker, telemetry)| {

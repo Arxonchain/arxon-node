@@ -1,0 +1,38 @@
+[package]
+name = "arxon-zk"
+version = "0.1.0"
+license = "Unlicense"
+description = "Arxon Halo2 circuits (Pasta, IPA, Poseidon): prover, verifier and native primitives. std only; the runtime reaches it through the verify_halo2_ipa host function."
+authors = { workspace = true }
+edition = { workspace = true }
+repository = { workspace = true }
+publish = false
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+arxon-zk-primitives = { workspace = true, features = ["poseidon", "std"] }
+ff = { workspace = true, features = ["std"] }
+group = { workspace = true }
+halo2_gadgets = { workspace = true }
+halo2_poseidon = { workspace = true }
+halo2_proofs = { workspace = true, features = ["batch"] }
+pasta_curves = { workspace = true }
+rand_core = { workspace = true, features = ["getrandom"] }
+sp-crypto-hashing = { workspace = true, features = ["std"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true, features = ["std"] }
+proptest = { workspace = true }
+rand_chacha = { workspace = true }
+
+[features]
+default = ["multicore"]
+# Rayon-based parallel proving and verification (halo2 default). Disable to measure single-threaded weights.
+multicore = ["halo2_proofs/multicore"]
+# Fail early inside create_proof on unsatisfied witnesses (development aid).
+sanity-checks = ["halo2_proofs/sanity-checks"]
+# Circuit layout rendering via plotters.
+dev-graph = ["halo2_proofs/dev-graph"]

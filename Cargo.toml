@@ -51,6 +51,7 @@ members = [
 	"precompiles/tests-external",
 	"template/fuzz",
 	"crates/zk-primitives",
+	"crates/zk",
 ]
 resolver = "2"
 

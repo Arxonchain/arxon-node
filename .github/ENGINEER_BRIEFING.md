@@ -4,7 +4,7 @@ Clone branch `stable2512`. Read this once before writing circuits or changing th
 
 Status on branch `zk/selective-privacy` (September 2026): the six Halo2 circuits, the three ZK pallets, the host function, the privacy and PTR rewrites, the `0x800` precompile and the quantum account tests are implemented and tested. The sections below keep the original requirements and record, per item, what was delivered and where it deviates. The root `README.md` section "Selective privacy with ZK" is the user facing summary.
 
-Remaining after this delivery: EVM submission precompile `0x801` (separate increment), measured weights for the new pallets, wallet SDK and mobile prover, public network keys.
+Remaining after this delivery: EVM submission precompile `0x801` (separate increment), weights re-measured on reference hardware, wallet SDK and mobile prover, public network keys.
 
 ---
 
@@ -222,7 +222,7 @@ Runtime pallet indices 18 (verifier), 19 (nullifier registry), and 20 (note / me
 * Constraint-count regression in CI.
 * Soundness tests on invalid witnesses.
 * Measured weights, not hardcoded guesses.
-* Delivered: replay (chain id constant in every VK, expiry window, bundle digest), front running (digest binds recipient and nullifiers), malleability (exact proof length pins, canonical field decoding), constraint regression (VK hash and proof length pins asserted in `make test`), soundness (a failing witness test per constraint and a tamper test per public row). Weights are still placeholders: run `arxon-node benchmark pallet` for pallets 13, 15, 18, 19, 20 on reference hardware.
+* Delivered: replay (chain id constant in every VK, expiry window, bundle digest), front running (digest binds recipient and nullifiers), malleability (exact proof length pins, canonical field decoding), constraint regression (VK hash and proof length pins asserted in `make test`), soundness (a failing witness test per constraint and a tamper test per public row). Weights: pallets 13, 15, 18, 19, 20 have `#[benchmarks]` modules and weights measured through `arxon-node benchmark pallet` on a developer desktop (verification 3 to 6 ms per proof, note tree insert 5.1 ms); bundle extrinsics compose the measured primitives. Re-run `make benchmark-zk` on the reference hardware before mainnet.
 
 ### Out of ZK scope unless asked
 

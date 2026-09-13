@@ -104,7 +104,9 @@ impl pallet_zk_verifier::Config for Test {
 	type WeightInfo = ();
 }
 
-impl pallet_nullifier_registry::Config for Test {}
+impl pallet_nullifier_registry::Config for Test {
+	type WeightInfo = ();
+}
 
 impl pallet_note_tree::Config for Test {
 	type Hasher = pallet_note_tree::PoseidonHasher;
@@ -150,6 +152,10 @@ impl ReceiptSink for RecordingSink {
 		RECEIPTS.with(|r| r.borrow_mut().push((ptr_id, cv, mask_bits)));
 		Ok(())
 	}
+
+	fn record_weight() -> frame_support::weights::Weight {
+		frame_support::weights::Weight::zero()
+	}
 }
 
 impl pallet_privacy::Config for Test {
@@ -180,6 +186,7 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 			dev_accounts: None,
 		},
 		zk_verifier: Default::default(),
+		note_tree: Default::default(),
 	};
 	let mut ext: sp_io::TestExternalities = genesis.build_storage().unwrap().into();
 	ext.execute_with(|| System::set_block_number(1));

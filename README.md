@@ -108,7 +108,7 @@ cargo build --release -p arxon-node
 
 * Hidden fields never reach chain state: a full node sees commitments, nullifiers and proofs. The account that signs and pays for a shielded extrinsic is visible (v1 limitation, see below).
 * PTR receipts store a Poseidon commitment only. Receipts are opened by an audience bound disclosure proof, never by plaintext.
-* Weights of the ZK pallets are conservative placeholders until benchmarks run on reference hardware.
+* Weights of the ZK pallets are measured on a developer desktop (see below); re-run the benchmarks on the validators' reference hardware before mainnet.
 * Quantum accounts are opt in. ECDSA can still register or remove a quantum key.
 * Do not commit `.env`, keystores, or mnemonic files. The well-known Alith key in Frontier docs is for local `--dev` only.
 
@@ -216,7 +216,25 @@ The empty note tree root is `0x1ca704bf814299b9f2b8c2331355744f2f23b9ad33e794590
 | `make check-wasm` | The `no_std` crates the runtime embeds against `wasm32v1-none`. |
 | `make integration-test` | ts-tests, including `test-arxon-zk-precompile.ts` against a running node. |
 
-Changing a circuit changes its verifying key hash and proof lengths. Re-pin deliberately with `cargo test -p arxon-zk print_pins -- --ignored --nocapture`.
+Changing a circuit changes its verifying key hash and proof lengths. Re-pin deliberately with `cargo test -p arxon-zk print_pins -- --ignored --nocapture`, then regenerate the verifier benchmark fixtures with `cargo run --release -p arxon-zk --example gen_verifier_fixtures` (the `arxon-zk-host` test `verifier_benchmark_fixtures_still_verify` fails while they are stale).
+
+### Weights
+
+The ZK pallets carry benchmarked weights (`benchmark pallet` through `arxon-node`, which registers the verifier host function; `frame-omni-bencher` cannot run them). Verification and tree inserts are measured directly; bundle extrinsics compose those primitives in `pallet-privacy/src/weights.rs` (one Circuit 3 verification per input, one Circuit 1 verification per output, one Circuit 2 verification, one nullifier mark per input, one insert per output, plus the receipt and membership attachments when present).
+
+Measured on the development machine (24 core desktop, `benchmark machine` passes every CPU and memory check against the Substrate reference hardware; only random disk writes fall short):
+
+| Primitive | Ref time |
+|---|---|
+| Circuit 1 verification, 1 / 2 instances | 3.3 ms / 4.1 ms |
+| Circuit 2 verification | 3.3 ms |
+| Circuit 3 verification, 1 / 2 instances | 4.8 ms / 6.2 ms |
+| Circuit 4, 5, 6 verification | 3.0 ms, 3.0 ms, 3.8 ms |
+| Note tree insert (depth 32, Poseidon in Wasm) | 5.1 ms |
+| Membership tree insert (depth 16) | 2.6 ms |
+| Nullifier mark, receipt record | under 20 µs |
+
+A 2 in / 2 out private transfer therefore costs about 25 ms of ref time, so a block of 3000 ms of normal dispatch weight holds roughly 120 of them. Regenerate with `make benchmark-zk` after building `arxon-node` with `--features runtime-benchmarks`.
 
 ## Roadmap
 

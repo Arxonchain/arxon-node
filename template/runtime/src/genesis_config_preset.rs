@@ -104,7 +104,7 @@ fn testnet_genesis(
 		base_fee: Default::default(),
 		grandpa: Default::default(),
 		balances: BalancesConfig {
-			balances: endowed_accounts.iter().cloned().collect(),
+			balances: endowed_accounts.to_vec(),
 			..Default::default()
 		},
 		ethereum: EthereumConfig {
@@ -128,6 +128,7 @@ fn testnet_genesis(
 		transaction_payment: Default::default(),
 		// Every circuit registered with its frozen verifying key hash, enabled.
 		zk_verifier: Default::default(),
+		note_tree: Default::default(),
 	};
 
 	serde_json::to_value(&config).expect("Could not build genesis config.")

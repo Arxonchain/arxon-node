@@ -33,6 +33,9 @@ extern crate alloc;
 pub use pallet::*;
 pub mod weights;
 
+#[cfg(feature = "runtime-benchmarks")]
+mod benchmarking;
+
 #[cfg(test)]
 mod mock;
 #[cfg(test)]
@@ -47,11 +50,18 @@ use scale_info::TypeInfo;
 pub trait ReceiptSink {
 	/// Records a receipt commitment for the payment output with value commitment `cv`.
 	fn record(ptr_id: FieldBytes, cv: FieldBytes, mask_bits: u8) -> DispatchResult;
+
+	/// Weight of one [`Self::record`], for the bundle weight.
+	fn record_weight() -> frame_support::weights::Weight;
 }
 
 impl ReceiptSink for () {
 	fn record(_: FieldBytes, _: FieldBytes, _: u8) -> DispatchResult {
 		Ok(())
+	}
+
+	fn record_weight() -> frame_support::weights::Weight {
+		frame_support::weights::Weight::zero()
 	}
 }
 
@@ -562,7 +572,12 @@ pub mod pallet {
 		/// Spends notes and creates notes inside the pool, optionally attaching a
 		/// receipt (Circuit 4) and a trust registry attestation (Circuit 6).
 		#[pallet::call_index(6)]
-		#[pallet::weight(T::WeightInfo::submit_private_transfer(inputs.len() as u32, outputs.len() as u32))]
+		#[pallet::weight(T::WeightInfo::submit_private_transfer(
+			inputs.len() as u32,
+			outputs.len() as u32,
+			ptr.is_some(),
+			compliance.is_some()
+		))]
 		pub fn submit_private_transfer(
 			origin: OriginFor<T>,
 			anchor: FieldBytes,

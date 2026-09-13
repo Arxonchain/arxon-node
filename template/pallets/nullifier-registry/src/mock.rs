@@ -17,7 +17,9 @@ impl frame_system::Config for Test {
 	type Block = frame_system::mocking::MockBlock<Test>;
 }
 
-impl pallet_nullifier_registry::Config for Test {}
+impl pallet_nullifier_registry::Config for Test {
+	type WeightInfo = ();
+}
 
 /// Externalities at block 1 so events are recorded.
 pub fn new_test_ext() -> sp_io::TestExternalities {

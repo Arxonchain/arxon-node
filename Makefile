@@ -74,6 +74,15 @@ check-wasm:
 		-p pallet-zk-verifier -p pallet-nullifier-registry -p pallet-note-tree \
 		-p pallet-privacy -p pallet-ptr -p pallet-evm-precompile-arxon-zk
 
+.PHONY: benchmark-zk
+# Regenerate the weights of the ZK pallets (needs a release arxon-node built with --features runtime-benchmarks)
+benchmark-zk:
+	./target/release/arxon-node benchmark pallet --chain dev --pallet pallet_zk_verifier --extrinsic '*' --steps 50 --repeat 20 --template scripts/frame-weight-template.hbs --output template/pallets/zk-verifier/src/weights.rs
+	./target/release/arxon-node benchmark pallet --chain dev --pallet pallet_nullifier_registry --extrinsic '*' --steps 50 --repeat 20 --template scripts/frame-weight-template.hbs --output template/pallets/nullifier-registry/src/weights.rs
+	./target/release/arxon-node benchmark pallet --chain dev --pallet pallet_note_tree --extrinsic '*' --steps 50 --repeat 20 --template scripts/frame-weight-template.hbs --output template/pallets/note-tree/src/weights.rs
+	./target/release/arxon-node benchmark pallet --chain dev --pallet pallet_privacy --extrinsic '*' --steps 50 --repeat 20 --template scripts/frame-weight-template.hbs --output template/pallets/privacy/src/weights/benchmarked.rs
+	./target/release/arxon-node benchmark pallet --chain dev --pallet pallet_ptr --extrinsic '*' --steps 50 --repeat 20 --template scripts/frame-weight-template.hbs --output template/pallets/ptr/src/weights/benchmarked.rs
+
 .PHONY: integration-test integration-test-lint
 # Check code format and lint of integration tests
 integration-test-lint:

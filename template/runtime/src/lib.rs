@@ -643,6 +643,11 @@ mod benches {
 		[pallet_evm, EVM]
 		[pallet_evm_precompile_curve25519, EVMPrecompileCurve25519Bench::<Runtime>]
 		[pallet_evm_precompile_sha3fips, EVMPrecompileSha3FIPSBench::<Runtime>]
+		[pallet_zk_verifier, ZkVerifier]
+		[pallet_nullifier_registry, NullifierRegistry]
+		[pallet_note_tree, NoteTree]
+		[pallet_privacy, Privacy]
+		[pallet_ptr, PTR]
 	);
 }
 
@@ -1191,7 +1196,7 @@ impl pallet_privacy::Config for Runtime {
 	type Nullifiers = NullifierRegistry;
 	type Trees = NoteTree;
 	type Receipts = PTR;
-	type WeightInfo = ();
+	type WeightInfo = pallet_privacy::weights::SubstrateWeight<Runtime>;
 }
 
 impl pallet_arx_claim::Config for Runtime {
@@ -1202,7 +1207,7 @@ impl pallet_arx_claim::Config for Runtime {
 impl pallet_ptr::Config for Runtime {
 	type ZkVerifier = ZkVerifier;
 	type MaxProofValidity = ConstU32<128>;
-	type WeightInfo = ();
+	type WeightInfo = pallet_ptr::weights::SubstrateWeight<Runtime>;
 }
 
 impl pallet_trust_registry::Config for Runtime {
@@ -1223,14 +1228,16 @@ impl pallet_quantum_account::Config for Runtime {
 impl pallet_zk_verifier::Config for Runtime {
 	type Verifier = pallet_zk_verifier::HostVerifier;
 	type AdminOrigin = frame_system::EnsureRoot<AccountId>;
-	type WeightInfo = ();
+	type WeightInfo = pallet_zk_verifier::weights::SubstrateWeight<Runtime>;
 }
 
-impl pallet_nullifier_registry::Config for Runtime {}
+impl pallet_nullifier_registry::Config for Runtime {
+	type WeightInfo = pallet_nullifier_registry::weights::SubstrateWeight<Runtime>;
+}
 
 impl pallet_note_tree::Config for Runtime {
 	type Hasher = pallet_note_tree::PoseidonHasher;
 	// Anchors stay valid for this many inserts (not blocks); sized for the expected note rate.
 	type RootHistorySize = ConstU32<1024>;
-	type WeightInfo = ();
+	type WeightInfo = pallet_note_tree::weights::SubstrateWeight<Runtime>;
 }

@@ -25,6 +25,8 @@
 pub use pallet::*;
 pub mod weights;
 
+#[cfg(feature = "runtime-benchmarks")]
+mod benchmarking;
 #[cfg(test)]
 mod mock;
 #[cfg(test)]
@@ -114,6 +116,9 @@ pub trait MerkleTree {
 
 	/// `true` iff `leaf` was already inserted (an insert would fail with a duplicate).
 	fn contains_leaf(tree: TreeId, leaf: &FieldBytes) -> bool;
+
+	/// Weight of one [`Self::insert`] into `tree`, for consumers' weight functions.
+	fn insert_weight(tree: TreeId) -> frame_support::weights::Weight;
 }
 
 #[frame_support::pallet]
@@ -176,6 +181,24 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type KnownLeaves<T: Config> =
 		StorageDoubleMap<_, Twox64Concat, TreeId, Blake2_128Concat, FieldBytes, u64, OptionQuery>;
+
+	/// Genesis has nothing to configure; building it precomputes the empty
+	/// subtree chain of both trees so the first insert costs the same as any other.
+	#[pallet::genesis_config]
+	#[derive(frame_support::DefaultNoBound)]
+	pub struct GenesisConfig<T: Config> {
+		#[serde(skip)]
+		pub _phantom: PhantomData<T>,
+	}
+
+	#[pallet::genesis_build]
+	impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
+		fn build(&self) {
+			for tree in [TreeId::Note, TreeId::Membership] {
+				Pallet::<T>::empty_root(tree).expect("the hasher accepts the zero leaf");
+			}
+		}
+	}
 
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
@@ -328,6 +351,13 @@ pub mod pallet {
 
 		fn contains_leaf(tree: TreeId, leaf: &FieldBytes) -> bool {
 			KnownLeaves::<T>::contains_key(tree, leaf)
+		}
+
+		fn insert_weight(tree: TreeId) -> Weight {
+			match tree {
+				TreeId::Note => T::WeightInfo::insert(),
+				TreeId::Membership => T::WeightInfo::add_member(),
+			}
 		}
 	}
 }

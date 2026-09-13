@@ -94,6 +94,7 @@ pub fn new_test_ext() -> BasicExternalities {
 		ethereum: Default::default(),
 		evm: Default::default(),
 		zk_verifier: Default::default(),
+		note_tree: Default::default(),
 	}
 	.build_storage()
 	.unwrap();

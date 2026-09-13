@@ -27,6 +27,7 @@ thiserror = { workspace = true }
 hex = { workspace = true, features = ["std"] }
 proptest = { workspace = true }
 rand_chacha = { workspace = true }
+scale-codec = { workspace = true, features = ["std"] }
 
 [features]
 default = ["multicore"]

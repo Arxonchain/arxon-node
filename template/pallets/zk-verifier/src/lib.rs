@@ -18,6 +18,8 @@ extern crate alloc;
 pub use pallet::*;
 pub mod weights;
 
+#[cfg(feature = "runtime-benchmarks")]
+mod benchmarking;
 #[cfg(test)]
 mod mock;
 #[cfg(test)]
@@ -81,6 +83,9 @@ pub trait VerifyProof {
 		proof: &Proof,
 		public_inputs: &PublicInputs,
 	) -> DispatchResult;
+
+	/// Weight of verifying `instances` instances of `circuit_id`, for consumers' weight functions.
+	fn verify_weight(circuit_id: CircuitId, instances: u32) -> Weight;
 }
 
 #[frame_support::pallet]
@@ -235,7 +240,20 @@ pub mod pallet {
 
 		/// Weight of verifying `instances` instances of `circuit_id` (for consumers' weight functions).
 		pub fn verify_weight(circuit_id: CircuitId, instances: u32) -> Weight {
-			T::WeightInfo::verify_proof(circuit_id, instances)
+			match circuit_id {
+				CircuitId::PrivacyFlagEnforcement => {
+					T::WeightInfo::verify_privacy_flag_enforcement(instances)
+				}
+				CircuitId::BalanceIntegrity => T::WeightInfo::verify_balance_integrity(),
+				CircuitId::NullifierDerivation => {
+					T::WeightInfo::verify_nullifier_derivation(instances)
+				}
+				CircuitId::PtrGeneration => T::WeightInfo::verify_ptr_generation(),
+				CircuitId::DisclosureProof => T::WeightInfo::verify_disclosure_proof(),
+				CircuitId::TrustRegistryMembership => {
+					T::WeightInfo::verify_trust_registry_membership()
+				}
+			}
 		}
 
 		fn check_shape(circuit_id: CircuitId, public_inputs: &PublicInputs) -> DispatchResult {
@@ -265,6 +283,10 @@ pub mod pallet {
 				.ok_or(Error::<T>::Overflow)?;
 			VerificationCount::<T>::put(count);
 			Ok(())
+		}
+
+		fn verify_weight(circuit_id: CircuitId, instances: u32) -> Weight {
+			Pallet::<T>::verify_weight(circuit_id, instances)
 		}
 
 		fn check_proof(

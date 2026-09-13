@@ -110,3 +110,45 @@ fn guarded_passes_through_a_normal_result() {
 	assert!(guarded(|| true));
 	assert!(!guarded(|| false));
 }
+
+/// The proof fixtures `pallet-zk-verifier` benchmarks use must stay valid: a circuit change
+/// that moves a verifying key stales them, and `benchmark pallet` would then measure a rejection.
+/// Regenerate with `cargo run --release -p arxon-zk --example gen_verifier_fixtures`.
+#[test]
+fn verifier_benchmark_fixtures_still_verify() {
+	macro_rules! fixture {
+		($name:literal) => {
+			(
+				$name,
+				&include_bytes!(concat!(
+					"../../../pallets/zk-verifier/fixtures/",
+					$name,
+					".proof"
+				))[..],
+				&include_bytes!(concat!(
+					"../../../pallets/zk-verifier/fixtures/",
+					$name,
+					".inputs"
+				))[..],
+			)
+		};
+	}
+	let fixtures = [
+		(CircuitId::PrivacyFlagEnforcement, fixture!("c1_1")),
+		(CircuitId::PrivacyFlagEnforcement, fixture!("c1_2")),
+		(CircuitId::BalanceIntegrity, fixture!("c2")),
+		(CircuitId::NullifierDerivation, fixture!("c3_1")),
+		(CircuitId::NullifierDerivation, fixture!("c3_2")),
+		(CircuitId::PtrGeneration, fixture!("c4")),
+		(CircuitId::DisclosureProof, fixture!("c5")),
+		(CircuitId::TrustRegistryMembership, fixture!("c6")),
+	];
+
+	for (id, (name, proof, inputs)) in fixtures {
+		assert_eq!(
+			verify(id.as_u8(), &vk_hash(id), proof, inputs),
+			Ok(()),
+			"stale benchmark fixture {name}: regenerate with gen_verifier_fixtures"
+		);
+	}
+}

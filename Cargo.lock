@@ -703,6 +703,7 @@ dependencies = [
  "halo2_poseidon",
  "halo2_proofs",
  "hex",
+ "parity-scale-codec",
  "pasta_curves",
  "proptest",
  "rand_chacha 0.3.1",

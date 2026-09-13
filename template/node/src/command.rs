@@ -158,14 +158,16 @@ pub fn run() -> sc_cli::Result<()> {
 			use crate::benchmarking::{
 				inherent_benchmark_data, RemarkBuilder, TransferKeepAliveBuilder,
 			};
+			use arxon_runtime::{Hashing, EXISTENTIAL_DEPOSIT};
 			use frame_benchmarking_cli::{
 				BenchmarkCmd, ExtrinsicFactory, SUBSTRATE_REFERENCE_HARDWARE,
 			};
-			use arxon_runtime::{Hashing, EXISTENTIAL_DEPOSIT};
 
 			let runner = cli.create_runner(cmd)?;
 			match cmd {
 				BenchmarkCmd::Pallet(cmd) => runner.sync_run(|config| {
+					// Proof benchmarks must not pay verifying key generation.
+					arxon_zk::key_cache::warm_up();
 					cmd.run_with_spec::<
 						Hashing,
 						(

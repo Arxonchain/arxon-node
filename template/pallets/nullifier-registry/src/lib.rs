@@ -14,7 +14,10 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub use pallet::*;
+pub mod weights;
 
+#[cfg(feature = "runtime-benchmarks")]
+mod benchmarking;
 #[cfg(test)]
 mod mock;
 #[cfg(test)]
@@ -30,6 +33,9 @@ pub trait NullifierSet {
 	fn mark_spent(
 		nullifier: &arxon_zk_primitives::FieldBytes,
 	) -> frame_support::pallet_prelude::DispatchResult;
+
+	/// Weight of one [`Self::mark_spent`], for consumers' weight functions.
+	fn mark_spent_weight() -> frame_support::weights::Weight;
 }
 
 #[frame_support::pallet]
@@ -38,13 +44,16 @@ pub mod pallet {
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
 
-	use super::NullifierSet;
+	use super::{weights::WeightInfo, NullifierSet};
 
 	#[pallet::pallet]
 	pub struct Pallet<T>(_);
 
 	#[pallet::config]
-	pub trait Config: frame_system::Config<RuntimeEvent: From<Event<Self>>> {}
+	pub trait Config: frame_system::Config<RuntimeEvent: From<Event<Self>>> {
+		/// Weights.
+		type WeightInfo: WeightInfo;
+	}
 
 	/// Spent nullifiers and the block they were spent in.
 	#[pallet::storage]
@@ -110,6 +119,10 @@ pub mod pallet {
 
 		fn mark_spent(nullifier: &FieldBytes) -> DispatchResult {
 			Pallet::<T>::mark_spent(nullifier)
+		}
+
+		fn mark_spent_weight() -> Weight {
+			T::WeightInfo::mark_spent()
 		}
 	}
 }

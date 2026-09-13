@@ -19,6 +19,9 @@
 pub use pallet::*;
 pub mod weights;
 
+#[cfg(feature = "runtime-benchmarks")]
+mod benchmarking;
+
 #[cfg(test)]
 mod mock;
 #[cfg(test)]
@@ -275,6 +278,10 @@ pub mod pallet {
 				mask_bits,
 			});
 			Ok(())
+		}
+
+		fn record_weight() -> Weight {
+			T::WeightInfo::record()
 		}
 	}
 }

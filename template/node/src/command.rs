@@ -166,8 +166,14 @@ pub fn run() -> sc_cli::Result<()> {
 			let runner = cli.create_runner(cmd)?;
 			match cmd {
 				BenchmarkCmd::Pallet(cmd) => runner.sync_run(|config| {
-					// Proof benchmarks must not pay verifying key generation.
-					arxon_zk::key_cache::warm_up();
+					// Proof benchmarks must not pay verifying key generation, and must
+					// not measure a node whose circuits drifted from the frozen keys.
+					if let Err(drifted) = arxon_zk::key_cache::warm_up() {
+						return Err(format!(
+							"verifying keys of {drifted:?} do not match their frozen hashes"
+						)
+						.into());
+					}
 					cmd.run_with_spec::<
 						Hashing,
 						(

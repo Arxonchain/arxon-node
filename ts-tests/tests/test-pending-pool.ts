@@ -35,9 +35,10 @@ describeWithFrontierAllPools("Frontier RPC (Pending Pool)", (context) => {
 		expect(pendingTransaction).to.include({
 			blockNumber: null,
 			hash: txHash,
-			r: "0x8e3759de96b00f8a05a95c24fa905963f86a82a0038cca0fde035762fb2d24f7",
-			s: "0x7131a2c265463f4bb063504f924df4d3d14bdad9cdfff8391041ea78295d186b",
-			v: "0x77",
+			// The signature depends on the chain id (EIP-155), so take it from the signed transaction.
+			r: tx.r,
+			s: tx.s,
+			v: tx.v,
 		});
 
 		await createAndFinalizeBlock(context.web3);
@@ -45,9 +46,10 @@ describeWithFrontierAllPools("Frontier RPC (Pending Pool)", (context) => {
 		const processedTransaction = (await customRequest(context.web3, "eth_getTransactionByHash", [txHash])).result;
 		expect(processedTransaction).to.include({
 			hash: txHash,
-			r: "0x8e3759de96b00f8a05a95c24fa905963f86a82a0038cca0fde035762fb2d24f7",
-			s: "0x7131a2c265463f4bb063504f924df4d3d14bdad9cdfff8391041ea78295d186b",
-			v: "0x77",
+			// The signature depends on the chain id (EIP-155), so take it from the signed transaction.
+			r: tx.r,
+			s: tx.s,
+			v: tx.v,
 		});
 	});
 });

@@ -4,10 +4,12 @@ on:
   push:
     branches:
       - master
+      - stable2512
       - 'polkadot-v**'
   pull_request:
     branches:
       - master
+      - stable2512
       - 'polkadot-v**'
   merge_group:
     branches: master

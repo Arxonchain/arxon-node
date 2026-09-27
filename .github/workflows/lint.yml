@@ -4,12 +4,14 @@ on:
   push:
     branches:
       - master
+      - stable2512
       - 'polkadot-v**'
     paths-ignore:
       - "**.md"
   pull_request:
     branches:
       - master
+      - stable2512
       - 'polkadot-v**'
     paths-ignore:
       - "**.md"
@@ -62,3 +64,6 @@ jobs:
 
       - name: Run clippy
         run: make clippy-release
+
+      - name: Check no_std crates against wasm32v1-none
+        run: make check-wasm

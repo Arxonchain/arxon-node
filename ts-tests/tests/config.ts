@@ -7,8 +7,13 @@ export const FIRST_CONTRACT_ADDRESS = "0xc2bf5f29a4384b1ab0c063e1c666f02121b6084
 export const NODE_BINARY_NAME = "arxon-node";
 
 export const RUNTIME_SPEC_NAME = "arxon";
-export const RUNTIME_SPEC_VERSION = 1;
+export const RUNTIME_SPEC_VERSION = 2;
 export const RUNTIME_IMPL_VERSION = 1;
+
+export const ARXON_ZK_PRECOMPILE = "0x0000000000000000000000000000000000000800";
+// Poseidon empty roots of the depth 32 note tree and the depth 16 membership tree (frozen in pallet-note-tree tests).
+export const NOTE_TREE_EMPTY_ROOT = "0x1ca704bf814299b9f2b8c2331355744f2f23b9ad33e794590c9153a21fca001f";
+export const MEMBERSHIP_TREE_EMPTY_ROOT = "0xcb7b604832ada5c237d29fb877d9fd8a127cf14c95c1a23d0338aad69d3fe906";
 
 export const CHAIN_ID = 7171;
 export const BLOCK_TIMESTAMP = 6; // 6 seconds per block

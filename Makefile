@@ -56,6 +56,24 @@ test-release:
 	# Run fc-mapping-sync tests with SQL feature to ensure both backends are tested
 	cargo test --release --lib -p fc-mapping-sync --features=sql
 
+.PHONY: test-zk test-zk-e2e measure-zk check-wasm
+# Run the Halo2 circuit, host function and primitives tests in release (real IPA proofs)
+test-zk:
+	cargo test --release -p arxon-zk-primitives -p arxon-zk -p arxon-zk-host
+# Run the runtime end to end privacy tests (real proofs through the pallets) in release
+test-zk-e2e:
+	SKIP_WASM_BUILD=1 cargo test --release -p arxon-runtime --lib -- zk_integration
+# Print proof sizes, proving and verifying times and VK hashes of every circuit
+measure-zk:
+	cargo run --release -p arxon-zk --example measure
+# Type check the no_std crates the runtime embeds against the Wasm target
+check-wasm:
+	RUSTFLAGS="--cfg substrate_runtime" cargo check --target wasm32v1-none --no-default-features \
+		-p arxon-zk-primitives --features arxon-zk-primitives/poseidon \
+		-p arxon-zk-host -p arxon-zk-runtime-api \
+		-p pallet-zk-verifier -p pallet-nullifier-registry -p pallet-note-tree \
+		-p pallet-privacy -p pallet-ptr -p pallet-evm-precompile-arxon-zk
+
 .PHONY: integration-test integration-test-lint
 # Check code format and lint of integration tests
 integration-test-lint:

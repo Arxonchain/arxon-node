@@ -1,16 +1,23 @@
 //! One behaviour per test, through the precompile set tester.
 
 use arxon_zk_primitives::{CircuitId, FieldBytes, MAX_INSTANCES, MAX_PROOF_BYTES};
-use frame_support::assert_ok;
+use frame_support::{
+	assert_ok,
+	traits::{fungible::Inspect, ConstU32},
+};
 use pallet_evm::GasWeightMapping;
 use pallet_note_tree::{MerkleTree, TreeId};
 use precompile_utils::{prelude::*, testing::*};
-use sp_core::{H160, H256};
+use sp_core::{H160, H256, U256};
 
 use crate::{
 	mock::{
-		new_test_ext, precompiles, FakeVerifier, NoteTree, NullifierRegistry, PCall, Runtime,
-		RuntimeOrigin, ZkVerifier,
+		new_test_ext, precompiles, FakeVerifier, NoteTree, NullifierRegistry, PCall, Privacy,
+		Runtime, RuntimeOrigin, SCall, ZkVerifier, ALICE_BALANCE, UNIT,
+	},
+	submit::{
+		AbiInput, AbiInputs, AbiOptionalAttachment, AbiOutput, AbiOutputs, AbiProofs,
+		SUBMIT_ADDRESS,
 	},
 	AbiInstance, AbiProof, AbiPublicInputs, ADDRESS,
 };
@@ -366,4 +373,244 @@ fn unknown_selector_reverts() {
 			.prepare_test(Alice, address(), vec![0xde, 0xad, 0xbe, 0xef])
 			.execute_reverts(|out| out.starts_with(b"Unknown selector") || !out.is_empty());
 	});
+}
+
+// --- 0x801 submit ---------------------------------------------------------------------------------
+
+fn submit_address() -> H160 {
+	H160::from_low_u64_be(SUBMIT_ADDRESS)
+}
+
+fn h(byte: u8) -> H256 {
+	H256(FieldBytes::from_u64(0x1000 + byte as u64).0)
+}
+
+fn abi_output(cm: u8, cv: u8) -> AbiOutput {
+	AbiOutput {
+		cm: h(cm),
+		cv: h(cv),
+		revealed_receiver: h(0xb0),
+		revealed_amount: H256(FieldBytes::from_u64(42).0),
+		encrypted_note: vec![cm; 16].into(),
+	}
+}
+
+fn abi_input(nullifier: u8, cv: u8) -> AbiInput {
+	AbiInput {
+		nullifier: h(nullifier),
+		cv: h(cv),
+		revealed_sender: h(0xa0),
+	}
+}
+
+fn abi_outputs(items: Vec<AbiOutput>) -> AbiOutputs {
+	items.into()
+}
+
+fn abi_inputs(items: Vec<AbiInput>) -> AbiInputs {
+	items.into()
+}
+
+fn abi_proofs(spend: bool, output: bool) -> AbiProofs {
+	fn p(byte: u8) -> BoundedBytes<ConstU32<MAX_PROOF_BYTES>> {
+		vec![byte; 64].into()
+	}
+	fn empty() -> BoundedBytes<ConstU32<MAX_PROOF_BYTES>> {
+		Vec::<u8>::new().into()
+	}
+	AbiProofs {
+		spend: if spend { p(3) } else { empty() },
+		output: if output { p(1) } else { empty() },
+		balance: p(2),
+		receipt: empty(),
+		compliance: empty(),
+	}
+}
+
+fn none_attachment() -> AbiOptionalAttachment {
+	AbiOptionalAttachment {
+		present: false,
+		output_index: 0,
+		id: H256::zero(),
+	}
+}
+
+const EXPIRY: u64 = 100;
+
+fn shield_call(amount: u128, outs: AbiOutputs, mask: u8) -> SCall {
+	SCall::shield {
+		amount: U256::from(amount),
+		outputs: outs,
+		mask_bits: mask,
+		expiry_block: U256::from(EXPIRY),
+		proofs: abi_proofs(false, true),
+	}
+}
+
+fn revert_contains(out: &[u8], needle: &str) -> bool {
+	core::str::from_utf8(out)
+		.map(|s| s.contains(needle))
+		.unwrap_or(false)
+}
+
+#[test]
+fn submit_shield_moves_funds_into_the_pool_and_inserts_the_commitment() {
+	new_test_ext().execute_with(|| {
+		precompiles()
+			.prepare_test(
+				Alice,
+				submit_address(),
+				shield_call(42 * UNIT, abi_outputs(vec![abi_output(1, 2)]), 0),
+			)
+			.execute_returns(());
+
+		let alice: crate::mock::AccountId = Alice.into();
+		assert_eq!(
+			pallet_balances::Pallet::<Runtime>::balance(&alice),
+			ALICE_BALANCE - 42 * UNIT
+		);
+		assert_eq!(Privacy::pool_balance(), 42 * UNIT);
+		assert_eq!(NoteTree::leaf_count(TreeId::Note), 1);
+		assert!(NoteTree::contains_leaf(TreeId::Note, &FieldBytes(h(1).0)));
+	});
+}
+
+#[test]
+fn submit_shield_reverts_on_an_invalid_mask_and_does_not_write() {
+	new_test_ext().execute_with(|| {
+		precompiles()
+			.prepare_test(
+				Alice,
+				submit_address(),
+				shield_call(42 * UNIT, abi_outputs(vec![abi_output(1, 2)]), 0x10),
+			)
+			.execute_reverts(|out| revert_contains(out, "InvalidMask"));
+
+		assert_eq!(NoteTree::leaf_count(TreeId::Note), 0);
+		assert_eq!(Privacy::pool_balance(), 0);
+	});
+}
+
+#[test]
+fn submit_shield_reverts_when_the_verifier_rejects() {
+	new_test_ext().execute_with(|| {
+		FakeVerifier::set_accept(false);
+
+		precompiles()
+			.prepare_test(
+				Alice,
+				submit_address(),
+				shield_call(42 * UNIT, abi_outputs(vec![abi_output(1, 2)]), 0),
+			)
+			.execute_reverts(|out| revert_contains(out, "InvalidProof"));
+
+		assert_eq!(NoteTree::leaf_count(TreeId::Note), 0);
+	});
+}
+
+#[test]
+fn submit_shield_reverts_in_a_static_call() {
+	new_test_ext().execute_with(|| {
+		precompiles()
+			.prepare_test(
+				Alice,
+				submit_address(),
+				shield_call(42 * UNIT, abi_outputs(vec![abi_output(1, 2)]), 0),
+			)
+			.with_static_call(true)
+			.execute_reverts(|out| !out.is_empty());
+	});
+}
+
+#[test]
+fn submit_unshield_pays_the_recipient_from_the_pool() {
+	new_test_ext().execute_with(|| {
+		precompiles()
+			.prepare_test(
+				Alice,
+				submit_address(),
+				shield_call(42 * UNIT, abi_outputs(vec![abi_output(1, 2)]), 0),
+			)
+			.execute_returns(());
+		let anchor = H256(NoteTree::current_root(TreeId::Note).0);
+		let bob: crate::mock::AccountId = Bob.into();
+
+		precompiles()
+			.prepare_test(
+				Alice,
+				submit_address(),
+				SCall::unshield {
+					recipient: Address(Bob.into()),
+					amount: U256::from(42 * UNIT),
+					anchor,
+					inputs: abi_inputs(vec![abi_input(10, 11)]),
+					outputs: abi_outputs(vec![]),
+					mask_bits: 0,
+					expiry_block: U256::from(EXPIRY),
+					proofs: abi_proofs(true, false),
+				},
+			)
+			.execute_returns(());
+
+		assert_eq!(pallet_balances::Pallet::<Runtime>::balance(&bob), 42 * UNIT);
+		assert_eq!(Privacy::pool_balance(), 0);
+		assert!(NullifierRegistry::is_spent(&FieldBytes(h(10).0)));
+	});
+}
+
+#[test]
+fn submit_private_transfer_spends_and_creates_notes() {
+	new_test_ext().execute_with(|| {
+		precompiles()
+			.prepare_test(
+				Alice,
+				submit_address(),
+				shield_call(42 * UNIT, abi_outputs(vec![abi_output(1, 2)]), 0),
+			)
+			.execute_returns(());
+		let anchor = H256(NoteTree::current_root(TreeId::Note).0);
+
+		precompiles()
+			.prepare_test(
+				Alice,
+				submit_address(),
+				SCall::submit_private_transfer {
+					anchor,
+					inputs: abi_inputs(vec![abi_input(10, 11)]),
+					outputs: abi_outputs(vec![abi_output(3, 4)]),
+					mask_bits: 0b0111,
+					expiry_block: U256::from(EXPIRY),
+					ptr: none_attachment(),
+					compliance: none_attachment(),
+					proofs: abi_proofs(true, true),
+				},
+			)
+			.execute_returns(());
+
+		assert!(NullifierRegistry::is_spent(&FieldBytes(h(10).0)));
+		assert!(NoteTree::contains_leaf(TreeId::Note, &FieldBytes(h(3).0)));
+		assert_eq!(Privacy::pool_balance(), 42 * UNIT);
+	});
+}
+
+#[test]
+fn submit_selectors_match_the_documented_signatures() {
+	assert_eq!(
+		SCall::shield_selectors(),
+		&[compute_selector(
+			"shield(uint256,(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bytes,bytes,bytes,bytes,bytes))"
+		)]
+	);
+	assert_eq!(
+		SCall::unshield_selectors(),
+		&[compute_selector(
+			"unshield(address,uint256,bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bytes,bytes,bytes,bytes,bytes))"
+		)]
+	);
+	assert_eq!(
+		SCall::submit_private_transfer_selectors(),
+		&[compute_selector(
+			"submitPrivateTransfer(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),(bytes,bytes,bytes,bytes,bytes))"
+		)]
+	);
 }

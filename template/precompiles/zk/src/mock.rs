@@ -1,9 +1,14 @@
-//! Test runtime: pallet-evm with this precompile at 0x800, verifier with a fake backend.
+//! Test runtime: pallet-evm with 0x800 (view) and 0x801 (submit), verifier with a fake backend.
 
 use std::cell::RefCell;
 
 use arxon_zk_primitives::{CircuitId, PublicInputs};
-use frame_support::{derive_impl, parameter_types, traits::ConstU32, weights::Weight};
+use frame_support::{
+	derive_impl, parameter_types,
+	traits::{ConstU128, ConstU32, ConstU64},
+	weights::Weight,
+	PalletId,
+};
 use frame_system::EnsureRoot;
 use pallet_evm::{EnsureAddressNever, EnsureAddressRoot};
 use pallet_zk_verifier::ProofVerifier;
@@ -11,7 +16,7 @@ use precompile_utils::{precompile_set::*, testing::*};
 use sp_core::U256;
 use sp_runtime::BuildStorage;
 
-use crate::ArxonZkPrecompile;
+use crate::{ArxonZkPrecompile, ArxonZkSubmitPrecompile};
 
 pub type AccountId = MockAccount;
 pub type Balance = u128;
@@ -25,6 +30,7 @@ frame_support::construct_runtime!(
 		ZkVerifier: pallet_zk_verifier,
 		NullifierRegistry: pallet_nullifier_registry,
 		NoteTree: pallet_note_tree,
+		Privacy: pallet_privacy,
 	}
 );
 
@@ -46,9 +52,15 @@ impl pallet_balances::Config for Runtime {
 #[derive_impl(pallet_timestamp::config_preludes::TestDefaultConfig)]
 impl pallet_timestamp::Config for Runtime {}
 
-pub type Precompiles<R> =
-	PrecompileSetBuilder<R, (PrecompileAt<AddressU64<{ crate::ADDRESS }>, ArxonZkPrecompile<R>>,)>;
+pub type Precompiles<R> = PrecompileSetBuilder<
+	R,
+	(
+		PrecompileAt<AddressU64<{ crate::ADDRESS }>, ArxonZkPrecompile<R>>,
+		PrecompileAt<AddressU64<{ crate::SUBMIT_ADDRESS }>, ArxonZkSubmitPrecompile<R>>,
+	),
+>;
 pub type PCall = crate::ArxonZkPrecompileCall<Runtime>;
+pub type SCall = crate::submit::ArxonZkSubmitPrecompileCall<Runtime>;
 
 const MAX_POV_SIZE: u64 = 5 * 1024 * 1024;
 
@@ -60,6 +72,7 @@ parameter_types! {
 		let block_gas_limit = BlockGasLimit::get().min(u64::MAX.into()).low_u64();
 		block_gas_limit.saturating_div(MAX_POV_SIZE)
 	};
+	pub const PrivacyPalletId: PalletId = PalletId(*b"arx/shld");
 }
 
 impl pallet_evm::Config for Runtime {
@@ -134,16 +147,35 @@ impl pallet_note_tree::Config for Runtime {
 	type WeightInfo = ();
 }
 
+/// 1 ARX = 10^9 shielded units in these tests (as in the runtime).
+pub const UNIT: Balance = 1_000_000_000;
+pub const ALICE_BALANCE: Balance = 1_000 * UNIT;
+
+impl pallet_privacy::Config for Runtime {
+	type Currency = Balances;
+	type PalletId = PrivacyPalletId;
+	type ShieldedUnit = ConstU128<UNIT>;
+	type MaxProofValidity = ConstU64<128>;
+	type ZkVerifier = ZkVerifier;
+	type Nullifiers = NullifierRegistry;
+	type Trees = NoteTree;
+	type Receipts = ();
+	type WeightInfo = ();
+}
+
 pub fn precompiles() -> Precompiles<Runtime> {
 	PrecompilesValue::get()
 }
 
-/// Externalities at block 1 with every circuit registered and the fake verifier accepting.
+/// Externalities at block 1 with every circuit registered, Alice funded, fake verifier accepting.
 pub fn new_test_ext() -> sp_io::TestExternalities {
 	FakeVerifier::reset();
 	let genesis = RuntimeGenesisConfig {
 		system: Default::default(),
-		balances: Default::default(),
+		balances: pallet_balances::GenesisConfig {
+			balances: vec![(Alice.into(), ALICE_BALANCE)],
+			dev_accounts: None,
+		},
 		evm: Default::default(),
 		zk_verifier: Default::default(),
 		note_tree: Default::default(),

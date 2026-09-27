@@ -3,8 +3,7 @@
 //! The EVM door into the shielded pool's verifier and state, exactly as the
 //! engineer briefing lists it: **view only**. Solidity contracts and MetaMask
 //! users read the same nullifier set, tree roots and verifier the native path
-//! writes to; no method here changes state (the submission path is a separate
-//! precompile, `0x801`, planned after this one).
+//! writes to; no method here changes state. Submission is [`submit`] at `0x801`.
 //!
 //! ABI (`bytes32` values are canonical little-endian Pallas base field
 //! elements, the same bytes the native extrinsics use):
@@ -40,10 +39,14 @@ use precompile_utils::prelude::*;
 use scale_codec::MaxEncodedLen;
 use sp_core::H256;
 
+pub mod submit;
+
 #[cfg(test)]
 mod mock;
 #[cfg(test)]
 mod tests;
+
+pub use submit::{ArxonZkSubmitPrecompile, SUBMIT_ADDRESS};
 
 /// Address of this precompile (reserved by the runtime as `ARXON_ZK_PRECOMPILE`).
 pub const ADDRESS: u64 = 0x800;

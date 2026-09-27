@@ -70,7 +70,7 @@ pub use pallet_balances::Call as BalancesCall;
 pub use pallet_timestamp::Call as TimestampCall;
 
 use precompiles::FrontierPrecompiles;
-pub use precompiles::ARXON_ZK_PRECOMPILE;
+pub use precompiles::{ARXON_ZK_PRECOMPILE, ARXON_ZK_SUBMIT_PRECOMPILE};
 
 /// Type of block number.
 pub type BlockNumber = u32;

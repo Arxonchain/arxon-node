@@ -142,7 +142,7 @@ Code map:
 | `template/primitives/zk-host` | `arxon-zk-host` | Host function `verify_halo2_ipa(circuit_id, vk_hash, proof, public_inputs)`. Verification never runs inside Wasm. |
 | `template/primitives/zk-runtime-api` | `arxon-zk-runtime-api` | `ArxonZkApi`: note and membership roots, anchor and nullifier lookups, circuit status. |
 | `template/pallets/{zk-verifier,nullifier-registry,note-tree,privacy,ptr}` | pallets 18, 19, 20, 13, 15 | Runtime enforcement. |
-| `template/precompiles/zk` | `pallet-evm-precompile-arxon-zk` | Precompile `0x800`. |
+| `template/precompiles/zk` | `pallet-evm-precompile-arxon-zk` | Precompiles `0x800` (view) and `0x801` (submit). |
 
 ### Shielded pool
 
@@ -213,13 +213,25 @@ The empty note tree root is `0x1ca704bf814299b9f2b8c2331355744f2f23b9ad33e794590
 
 A verification costs 250k to 800k gas (its weight at 40,000 ps per gas). `eth_call` runs with up to `--execute-gas-limit-multiplier` (default 10) times the 75M block gas limit, so one free call can run about 3000 verifications, around 30 seconds of CPU. Public RPC nodes should lower that multiplier.
 
+### EVM precompile `0x801`
+
+State-changing. Dispatches into the same `pallet_privacy` calls as the native extrinsics, signed as the EVM caller. `msg.value` is rejected; amounts are ABI `uint256` base units. Empty proof `bytes` mean `None` (the balance proof is required). Optional PTR and compliance attachments are `(bool present, uint8 outputIndex, bytes32 id)`.
+
+| Method | Native call |
+|---|---|
+| `shield(uint256 amount, Output[] outputs, uint8 maskBits, uint256 expiryBlock, Proofs proofs)` | `privacy.shield` |
+| `unshield(address recipient, uint256 amount, bytes32 anchor, Input[] inputs, Output[] outputs, uint8 maskBits, uint256 expiryBlock, Proofs proofs)` | `privacy.unshield` |
+| `submitPrivateTransfer(bytes32 anchor, Input[] inputs, Output[] outputs, uint8 maskBits, uint256 expiryBlock, OptionalPtr ptr, OptionalCompliance compliance, Proofs proofs)` | `privacy.submit_private_transfer` |
+
+ABI tuples (Solidity structs encode the same way): `Output` is `(bytes32 cm, bytes32 cv, bytes32 revealedReceiver, bytes32 revealedAmount, bytes encryptedNote)`, `Input` is `(bytes32 nullifier, bytes32 cv, bytes32 revealedSender)`, `Proofs` is `(bytes spend, bytes output, bytes balance, bytes receipt, bytes compliance)`.
+
 ### Deviations from the engineer briefing (for product sign-off)
 
 * **Value commitments** are Poseidon hashes `H_CV(amount, blinding)` instead of Pedersen commitments. Conservation is proven inside Circuit 2 by opening the four commitments, so no elliptic curve chip is needed and the circuits stay at K 9 to 11.
 * **Circuit 1 public inputs.** The nullifier moved to Circuit 3, since an output only circuit cannot prove what is spent. The "block window" is a single `expiry_block`; the pallet accepts it in `[now, now + 128]`.
 * **Note tree.** It is an append only incremental Merkle tree, not a sparse Merkle tree. Duplicate leaves are rejected, and recent roots are kept as anchors.
 * **Verifier interface.** `pallet-zk-verifier` exposes no `verify(circuit_id, proof, public_inputs)` extrinsic. It is the `VerifyProof` service that the pallets call, and it is reachable publicly through `0x800`.
-* **EVM submission** (shield, unshield and private transfers from Solidity) is not in `0x800`, which stays view only as listed. It is planned as a separate precompile `0x801` dispatching into the same `pallet_privacy::execute` path.
+* **EVM submission** (shield, unshield and private transfers from Solidity) is `0x801`, which dispatches into the same `pallet_privacy` path as the native extrinsics. `0x800` stays view only.
 * **Fees.** The extrinsic signer pays the fee and is visible. The bundle digest excludes the signer so relayers can submit on behalf of a user. The in circuit `fee` row exists and is fixed at 0 in v1.
 * **`hide_balance`** (bit 3) has no in circuit meaning. It is recorded with the bundle mask. `HideBalanceAccounts` is a separate opt in flag set by `set_balance_visibility`, and transparent balances stay public.
 * **Disclosure codes** are replaced by audience bound proofs (see [Disclosures](#disclosures)).
@@ -239,7 +251,7 @@ Roll the new `arxon-node` binary out to every validator and full node **before**
 | `make test-zk-e2e` | Runtime end to end: shield, relayed private transfer, unshield, receipt and disclosure, membership attestation, tampered proof and retargeted recipient rejected. |
 | `make measure-zk` | Proof sizes, timings and VK hashes; fails if a proof length or a verifying key hash drifts from its pin. |
 | `make check-wasm` | The `no_std` crates the runtime embeds against `wasm32v1-none`. |
-| `make integration-test` | ts-tests, including `test-arxon-zk-precompile.ts` against a running node. |
+| `make integration-test` | ts-tests, including `test-arxon-zk-precompile.ts` and `test-arxon-zk-submit-precompile.ts` against a running node. |
 
 Changing a circuit changes its verifying key hash and proof lengths. To re-pin deliberately:
 
@@ -281,10 +293,9 @@ Done:
 * Six Halo2 circuits and runtime enforcement of the four privacy flags
 * Nullifier set, note and membership trees, ZK verifier host function
 * EVM precompile `0x800` for proof verification
+* EVM precompile `0x801` for shield, unshield and private transfer
 
 Next:
-
-* EVM submission precompile `0x801` (shield, unshield, private transfer from Solidity)
 * ZK pallet weights re-measured on reference hardware
 * Key ownership proof for `register_shielded_key`
 * Removal from the trust registry membership tree

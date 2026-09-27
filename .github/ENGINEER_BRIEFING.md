@@ -2,9 +2,9 @@
 
 Clone branch `stable2512`. Read this once before writing circuits or changing the runtime. The same text is on the GitHub Issues tab of this repository.
 
-Status on branch `zk/selective-privacy` (September 2026): the six Halo2 circuits, the three ZK pallets, the host function, the privacy and PTR rewrites, the `0x800` precompile and the quantum account tests are implemented and tested. The sections below keep the original requirements and record, per item, what was delivered and where it deviates. The root `README.md` section "Selective privacy with ZK" is the user facing summary.
+Status on branch `stable2512` (September 2026): the six Halo2 circuits, the three ZK pallets, the host function, the privacy and PTR rewrites, the `0x800` / `0x801` precompiles and the quantum account tests are implemented and tested. The sections below keep the original requirements and record, per item, what was delivered and where it deviates. The root `README.md` section "Selective privacy with ZK" is the user facing summary.
 
-Remaining after this delivery: EVM submission precompile `0x801` (separate increment), weights re-measured on reference hardware, wallet SDK and mobile prover, a key ownership proof for `register_shielded_key`, removal from the membership tree, public network keys. The post quantum items listed below are outside this delivery's scope.
+Remaining after this delivery: weights re-measured on reference hardware, wallet SDK and mobile prover, a key ownership proof for `register_shielded_key`, removal from the membership tree, public network keys. The post quantum items listed below are outside this delivery's scope.
 
 Upgrading the live testnet: roll the new `arxon-node` binary out to every node before `set_code` (the runtime imports the `verify_halo2_ipa` host function). Spec 2 migrates the new pallets' state; see the README section "Upgrading a running chain".
 
@@ -20,7 +20,7 @@ Upgrading the live testnet: roll the new `arxon-node` binary out to every node b
 * Polkadot SDK `stable2512`. Rust `1.88.0` in `rust-toolchain.toml`.
 * EVM via Frontier. Chain ID **7171** on both the development spec and the local testnet spec. Constant: `ARXON_EVM_CHAIN_ID` in `template/runtime/src/lib.rs`. Specs: `template/node/src/chain_spec.rs`.
 * MetaMask RPC: `http://127.0.0.1:9944`. Token symbol `ARX`, 18 decimals (`ARX_DECIMALS`, `ARX_UNIT`).
-* Standard Ethereum precompiles at `0x01` through `0x05`, plus Frontier extras at `0x400` through `0x403` (SHA3-FIPS, ECRecover public key, Curve25519 add/mul). File: `template/runtime/src/precompiles.rs`. Address `0x800` is the Arxon ZK precompile (`template/precompiles/zk`): `verifyPrivacyProof`, `isNullifierSpent`, `getTrustRegistryRoot`, `getNoteTreeRoot`, `isKnownNoteRoot`, all view.
+* Standard Ethereum precompiles at `0x01` through `0x05`, plus Frontier extras at `0x400` through `0x403` (SHA3-FIPS, ECRecover public key, Curve25519 add/mul). File: `template/runtime/src/precompiles.rs`. Address `0x800` is the Arxon ZK view precompile (`template/precompiles/zk`): `verifyPrivacyProof`, `isNullifierSpent`, `getTrustRegistryRoot`, `getNoteTreeRoot`, `isKnownNoteRoot`, all view. Address `0x801` is the submission precompile: `shield`, `unshield`, `submitPrivateTransfer`, dispatching into `pallet_privacy`.
 * `--dev` genesis sudo and treasury is the well-known **Alith** test account. Aura authority is the well-known `//Alice` seed. Those keys are public. Local machines only. Do not ship this genesis as a public network.
 
 ### ARX token and genesis
@@ -125,14 +125,14 @@ Delivered layout:
 | `template/pallets/zk-verifier` | `pallet-zk-verifier` | 18 |
 | `template/pallets/nullifier-registry` | `pallet-nullifier-registry` | 19 |
 | `template/pallets/note-tree` | `pallet-note-tree` | 20 (note tree depth 32 and membership tree depth 16 in one pallet, keyed by `TreeId`) |
-| `template/precompiles/zk` | `pallet-evm-precompile-arxon-zk` | `0x800` |
+| `template/precompiles/zk` | `pallet-evm-precompile-arxon-zk` | `0x800` view, `0x801` submit |
 
 Measured on a 24 thread developer laptop (`make measure-zk`): single instance proofs are 3456 to 3584 bytes (two instance proofs up to 5088), and wallet proving takes 130 to 500 ms. Nodes verify single threaded in 10 to 31 ms per proof (benchmarked weights). Verifying key hashes are frozen in `arxon-zk-primitives::VK_HASHES`, asserted by tests, and checked by every node against the keys it builds; proof lengths are pinned per circuit and instance count and checked before the transcript is read.
 
 Deviations, for product sign-off:
 
 * Value commitments are Poseidon `cv = H_CV(amount, blinding)` instead of Pedersen. Conservation is proven inside Circuit 2 by opening the four commitments; no ECC chip, smaller circuits.
-* `0x800` stays view only as listed below. EVM submission goes to a separate `0x801` precompile (not started, separate approval).
+* `0x800` stays view only as listed below. EVM submission is `0x801`, dispatching into the same `pallet_privacy` calls as the native extrinsics.
 * The extrinsic signer is visible and pays the fee in v1; the bundle digest excludes the signer so relayers work. The `fee` public row is fixed at 0.
 * `hide_balance` (bit 3) has no in circuit effect. It is recorded with the bundle mask; `HideBalanceAccounts` is a separate opt in flag set by `set_balance_visibility`, and transparent balances stay public.
 * Circuit 1 carries no nullifier (Circuit 3 does) and the block window is a single `expiry_block` accepted in `[now, now + 128]`.
@@ -200,7 +200,7 @@ Original: EVM precompile address `0x800` was reserved with a revert stub, and ru
 * Update `pallet-privacy` so a private transfer without a valid Circuit 1 proof is rejected.
 * Rewrite `pallet-ptr` to commitments.
 * Hook a real private-transfer extrinsic **and** an EVM path so flags cannot be painted onto unrelated hashes. Both paths verify Circuit 1–6 against the same pool.
-* Delivered: all of the above except the EVM submission path (`0x801`, pending). The note tree is an append only Poseidon Merkle tree with `KnownLeaves` duplicate rejection and a history of the roots of the last 65536 inserts; Poseidon runs inside the runtime Wasm for inserts, verification runs natively through the host function only. Circuits can be disabled by governance (`set_circuit_enabled`). VK hashes are the frozen constants of the running code, set at genesis and by the spec 2 migration.
+* Delivered: all of the above, including the EVM submission path (`0x801`). The note tree is an append only Poseidon Merkle tree with `KnownLeaves` duplicate rejection and a history of the roots of the last 65536 inserts; Poseidon runs inside the runtime Wasm for inserts, verification runs natively through the host function only. Circuits can be disabled by governance (`set_circuit_enabled`). VK hashes are the frozen constants of the running code, set at genesis and by the spec 2 migration.
 
 ### Crypto parameters
 
@@ -217,7 +217,7 @@ Original: EVM precompile address `0x800` was reserved with a revert stub, and ru
 * View only. Cap proof size and public input count. Gas model required.
 * Register methods in `template/runtime/src/precompiles.rs`.
 * Proofs bind to chain ID 7171 and `PrivacyMask::as_bits`. Native and EVM must not fork the mask encoding.
-* Delivered: `0x800` with the three listed methods plus `getNoteTreeRoot` and `isKnownNoteRoot`, all view, proof capped at 8192 bytes and public inputs at 2 instances of 16 rows, gas from the verifier weight. `ts-tests/tests/test-arxon-zk-precompile.ts` exercises it against a running node. Submission from Solidity is the pending `0x801` increment.
+* Delivered: `0x800` with the three listed methods plus `getNoteTreeRoot` and `isKnownNoteRoot`, all view, proof capped at 8192 bytes and public inputs at 2 instances of 16 rows, gas from the verifier weight. `0x801` submits `shield`, `unshield` and `submitPrivateTransfer` into `pallet_privacy` as the EVM caller (empty optional proof bytes mean `None`; `msg.value` is rejected). `ts-tests/tests/test-arxon-zk-precompile.ts` exercises `0x800` against a running node; `ts-tests/tests/test-arxon-zk-submit-precompile.ts` covers `0x801`.
 
 ### Security after the circuits exist
 
@@ -248,7 +248,7 @@ Original: EVM precompile address `0x800` was reserved with a revert stub, and ru
 * `make test`: every unit test, including the runtime end to end tests with real proofs (`template/runtime/src/zk_integration.rs`).
 * `make test-zk`, `make test-zk-e2e`, `make measure-zk`, `make check-wasm`: see the Makefile.
 * `cargo build --release -p arxon-node && ./target/release/arxon-node --dev --tmp`, then `state_call ArxonZkApi_note_tree_root` returns the empty root `0x1ca704bf…` and `eth_call` to `0x800` answers `getTrustRegistryRoot()` with `0xcb7b6048…`.
-* `make integration-test` runs the ts-tests, including the `0x800` spec.
+* `make integration-test` runs the ts-tests, including the `0x800` and `0x801` specs.
 
 ## Housekeeping already done on this branch
 

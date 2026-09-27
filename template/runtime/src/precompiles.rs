@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 use pallet_evm::{
 	IsPrecompileResult, Precompile, PrecompileHandle, PrecompileResult, PrecompileSet,
 };
-use pallet_evm_precompile_arxon_zk::ArxonZkPrecompile;
+use pallet_evm_precompile_arxon_zk::{ArxonZkPrecompile, ArxonZkSubmitPrecompile};
 use sp_core::H160;
 
 use pallet_evm_precompile_curve25519 as curve25519_precompile;
@@ -13,6 +13,8 @@ use pallet_evm_precompile_simple::{ECRecover, ECRecoverPublicKey, Identity, Ripe
 /// Arxon ZK precompile: view-only access to the Halo2 verifier, the nullifier set
 /// and the shielded pool tree roots (`pallet-evm-precompile-arxon-zk`).
 pub const ARXON_ZK_PRECOMPILE: u64 = pallet_evm_precompile_arxon_zk::ADDRESS;
+/// Arxon ZK submission precompile: shield, unshield and private transfer.
+pub const ARXON_ZK_SUBMIT_PRECOMPILE: u64 = pallet_evm_precompile_arxon_zk::SUBMIT_ADDRESS;
 
 pub struct FrontierPrecompiles<R>(PhantomData<R>);
 
@@ -23,7 +25,7 @@ where
 	pub fn new() -> Self {
 		Self(Default::default())
 	}
-	pub fn used_addresses() -> [H160; 10] {
+	pub fn used_addresses() -> [H160; 11] {
 		[
 			hash(1),
 			hash(2),
@@ -35,6 +37,7 @@ where
 			hash(1026),
 			hash(1027),
 			hash(ARXON_ZK_PRECOMPILE),
+			hash(ARXON_ZK_SUBMIT_PRECOMPILE),
 		]
 	}
 }
@@ -44,7 +47,15 @@ where
 		+ frame_system::Config
 		+ pallet_zk_verifier::Config
 		+ pallet_nullifier_registry::Config
-		+ pallet_note_tree::Config,
+		+ pallet_note_tree::Config
+		+ pallet_privacy::Config,
+	R::RuntimeCall: sp_runtime::traits::Dispatchable<PostInfo = frame_support::dispatch::PostDispatchInfo>
+		+ frame_support::dispatch::GetDispatchInfo
+		+ From<pallet_privacy::Call<R>>,
+	<R::RuntimeCall as sp_runtime::traits::Dispatchable>::RuntimeOrigin:
+		From<frame_system::RawOrigin<pallet_evm::AccountIdOf<R>>>,
+	pallet_privacy::BalanceOf<R>: TryFrom<u128>,
+	frame_system::pallet_prelude::BlockNumberFor<R>: TryFrom<u128>,
 {
 	fn execute(&self, handle: &mut impl PrecompileHandle) -> Option<PrecompileResult> {
 		match handle.code_address() {
@@ -69,8 +80,12 @@ where
 				R,
 				crate::weights::pallet_evm_precompile_curve25519::WeightInfo<R>,
 			>::execute(handle)),
-			// Arxon ZK (view only; the submission path is a separate precompile).
+			// Arxon ZK view (nullifiers, roots, verifier).
 			a if a == hash(ARXON_ZK_PRECOMPILE) => Some(ArxonZkPrecompile::<R>::execute(handle)),
+			// Arxon ZK submit (same pallet_privacy path as the native extrinsics).
+			a if a == hash(ARXON_ZK_SUBMIT_PRECOMPILE) => {
+				Some(ArxonZkSubmitPrecompile::<R>::execute(handle))
+			}
 			_ => None,
 		}
 	}

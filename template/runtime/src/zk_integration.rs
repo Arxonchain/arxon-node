@@ -110,9 +110,10 @@ impl Attachments {
 	}
 
 	fn compliance(&self) -> Option<ComplianceAttachment> {
-		self.membership
-			.as_ref()
-			.map(|(i, _)| ComplianceAttachment { output_index: *i })
+		self.membership.as_ref().map(|(i, _)| ComplianceAttachment {
+			output_index: *i,
+			registry_root: NoteTree::current_root(TreeId::Membership),
+		})
 	}
 }
 
@@ -483,6 +484,26 @@ fn receipt_attached_to_a_private_payment_can_be_disclosed_to_an_auditor() {
 			MASK_ALL_HIDDEN,
 			ValueFlow::Transfer,
 			&attachments,
+		);
+		// A relayer that strips the receipt cannot reuse the proofs: they carry the digest
+		// of the bundle with the receipt attached.
+		let stripped = Privacy::submit_private_transfer(
+			RuntimeOrigin::signed(baltathar()),
+			anchor,
+			inputs_arg(std::slice::from_ref(&spend)),
+			outputs_arg(&[to_bob, change]),
+			MASK_ALL_HIDDEN,
+			EXPIRY,
+			None,
+			None,
+			ProofBundle {
+				receipt: None,
+				..proofs.clone()
+			},
+		);
+		assert_eq!(
+			stripped,
+			Err(pallet_zk_verifier::Error::<Runtime>::InvalidProof.into())
 		);
 		assert_ok!(Privacy::submit_private_transfer(
 			RuntimeOrigin::signed(baltathar()),

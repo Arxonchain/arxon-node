@@ -20,6 +20,8 @@ fn base<'a>(nullifiers: &'a [FieldBytes], commitments: &'a [FieldBytes]) -> Bund
 		cv_outputs: &[],
 		mask_bits: 0b0011,
 		encrypted_notes_hash: [0u8; 32],
+		receipt: None,
+		compliance: None,
 	}
 }
 
@@ -155,7 +157,7 @@ fn bundle_preimage_starts_with_the_domain_prefix() {
 
 	let preimage = fields.preimage();
 
-	assert!(preimage.starts_with(b"arxon/bundle/v1"));
+	assert!(preimage.starts_with(b"arxon/bundle/v2"));
 }
 
 #[test]
@@ -174,4 +176,30 @@ fn digest_to_field_is_canonical_and_injective_on_samples() {
 	assert!(a.is_canonical());
 	assert_eq!(a.0[31], 0);
 	assert_ne!(a, b);
+}
+
+#[test]
+fn bundle_digest_changes_when_a_receipt_is_attached_or_retargeted() {
+	let nfs = [fb(1)];
+	let bare = base(&nfs, &[]);
+	let mut with_receipt = bare.clone();
+	with_receipt.receipt = Some((0, fb(0x20)));
+	let mut other_output = with_receipt.clone();
+	other_output.receipt = Some((1, fb(0x20)));
+
+	assert_ne!(bundle_digest(&bare), bundle_digest(&with_receipt));
+	assert_ne!(bundle_digest(&with_receipt), bundle_digest(&other_output));
+}
+
+#[test]
+fn bundle_digest_changes_when_a_compliance_attestation_is_attached_or_rerooted() {
+	let nfs = [fb(1)];
+	let bare = base(&nfs, &[]);
+	let mut with_compliance = bare.clone();
+	with_compliance.compliance = Some((0, fb(0x30)));
+	let mut other_root = with_compliance.clone();
+	other_root.compliance = Some((0, fb(0x31)));
+
+	assert_ne!(bundle_digest(&bare), bundle_digest(&with_compliance));
+	assert_ne!(bundle_digest(&with_compliance), bundle_digest(&other_root));
 }

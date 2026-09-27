@@ -130,6 +130,13 @@ pub const MAX_ENCRYPTED_NOTE: u32 = 512;
 /// Maximum notes spent or created per bundle (Circuit 2 arity).
 pub const MAX_NOTES: u32 = arxon_zk_primitives::MAX_INSTANCES;
 
+// Circuit 2 has exactly `C2_INPUTS` and `C2_OUTPUTS` slots and the pallet fills them from the
+// bundle's notes. More notes than slots would drop value commitments from the balance check.
+const _: () = assert!(
+	MAX_NOTES as usize == arxon_zk_primitives::C2_INPUTS
+		&& MAX_NOTES as usize == arxon_zk_primitives::C2_OUTPUTS
+);
+
 /// Opaque wallet-encrypted `(pk_r, amount, rho, blinding)` for the receiver.
 pub type EncryptedNote = BoundedVec<u8, ConstU32<MAX_ENCRYPTED_NOTE>>;
 
@@ -240,6 +247,9 @@ pub struct PtrAttachment {
 pub struct ComplianceAttachment {
 	/// Which output is paid to the registry member.
 	pub output_index: u8,
+	/// Membership tree root the Circuit 6 proof was built against. Any recent
+	/// root is accepted, so an `add_member` does not invalidate proofs in flight.
+	pub registry_root: FieldBytes,
 }
 
 /// Spent and created notes of a bundle.
@@ -469,6 +479,8 @@ pub mod pallet {
 		DuplicateBundle,
 		/// A receipt or compliance attachment points past the outputs.
 		InvalidOutputIndex,
+		/// The compliance attachment's registry root is not a recent membership tree root.
+		UnknownRegistryRoot,
 	}
 
 	#[pallet::call]
@@ -765,6 +777,10 @@ pub mod pallet {
 					(c.output_index as usize) < intent.outputs.len(),
 					Error::<T>::InvalidOutputIndex
 				);
+				ensure!(
+					c.registry_root.is_canonical(),
+					Error::<T>::InvalidFieldElement
+				);
 			}
 			Ok(())
 		}
@@ -774,6 +790,12 @@ pub mod pallet {
 				ensure!(
 					T::Trees::is_known_root(TreeId::Note, anchor),
 					Error::<T>::UnknownAnchor
+				);
+			}
+			if let Some(c) = &intent.compliance {
+				ensure!(
+					T::Trees::is_known_root(TreeId::Membership, &c.registry_root),
+					Error::<T>::UnknownRegistryRoot
 				);
 			}
 			for (i, input) in intent.inputs.iter().enumerate() {
@@ -865,6 +887,8 @@ pub mod pallet {
 				cv_outputs: &cv_outputs,
 				mask_bits: intent.mask_bits,
 				encrypted_notes_hash: encrypted_notes_hash(&notes),
+				receipt: intent.ptr.map(|p| (p.payment_output_index, p.ptr_id)),
+				compliance: intent.compliance.map(|c| (c.output_index, c.registry_root)),
 			})
 		}
 
@@ -958,8 +982,7 @@ pub mod pallet {
 			}
 			if let (Some(c), Some(proof)) = (&intent.compliance, &intent.proofs.compliance) {
 				let paid = &intent.outputs[c.output_index as usize];
-				let root = T::Trees::current_root(TreeId::Membership);
-				let membership = C6PublicInputs::new(root, paid.cm, digest, expiry);
+				let membership = C6PublicInputs::new(c.registry_root, paid.cm, digest, expiry);
 				T::ZkVerifier::verify_proof(
 					CircuitId::TrustRegistryMembership,
 					proof,
@@ -1058,7 +1081,7 @@ pub mod pallet {
 				Self::deposit_event(Event::ComplianceAttested {
 					bundle_digest: digest,
 					output_index: c.output_index,
-					membership_root: T::Trees::current_root(TreeId::Membership),
+					membership_root: c.registry_root,
 				});
 			}
 			if mask.is_any_private() {

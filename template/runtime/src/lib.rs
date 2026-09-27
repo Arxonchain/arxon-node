@@ -1169,6 +1169,41 @@ mod tests {
 		assert_eq!(arxon_zk_primitives::CHAIN_ID, ARXON_EVM_CHAIN_ID);
 	}
 
+	/// An attacker filling every block with two-output shields (the most inserts per unit
+	/// of weight) must not evict a root before a proof built against it expires.
+	#[test]
+	fn root_history_outlives_the_proof_validity_window() {
+		use frame_support::traits::Get;
+		use pallet_privacy::weights::WeightInfo;
+
+		let normal = <Runtime as frame_system::Config>::BlockWeights::get()
+			.get(frame_support::dispatch::DispatchClass::Normal)
+			.max_total
+			.expect("normal class is capped")
+			.ref_time();
+		let shield = <Runtime as pallet_privacy::Config>::WeightInfo::shield(2).ref_time();
+		let inserts_per_block = u64::from(pallet_privacy::MAX_NOTES) * normal / shield;
+		let window =
+			u64::from(<<Runtime as pallet_privacy::Config>::MaxProofValidity as Get<u32>>::get());
+		let history =
+			u64::from(<<Runtime as pallet_note_tree::Config>::RootHistorySize as Get<u32>>::get());
+
+		assert!(
+			history >= inserts_per_block * window,
+			"history {history} < {inserts_per_block} inserts per block x {window} blocks"
+		);
+	}
+
+	#[test]
+	fn shielded_pool_account_is_frozen() {
+		assert_eq!(
+			pallet_privacy::Pallet::<Runtime>::pool_account(),
+			super::AccountId::from(sp_core::H160(hex_literal::hex!(
+				"6d6f646c6172782f73686c640000000000000000"
+			)))
+		);
+	}
+
 	#[test]
 	fn configured_base_extrinsic_weight_is_evm_compatible() {
 		let min_ethereum_transaction_weight = WeightPerGas::get() * 21_000;
@@ -1237,7 +1272,9 @@ impl pallet_nullifier_registry::Config for Runtime {
 
 impl pallet_note_tree::Config for Runtime {
 	type Hasher = pallet_note_tree::PoseidonHasher;
-	// Anchors stay valid for this many inserts (not blocks); sized for the expected note rate.
-	type RootHistorySize = ConstU32<1024>;
+	// Anchors stay valid for this many inserts, not blocks. Sized so that blocks packed with
+	// the cheapest inserts (two-output shields) cannot evict an anchor within the proof
+	// validity window; `root_history_outlives_the_proof_validity_window` checks the bound.
+	type RootHistorySize = ConstU32<65_536>;
 	type WeightInfo = pallet_note_tree::weights::SubstrateWeight<Runtime>;
 }

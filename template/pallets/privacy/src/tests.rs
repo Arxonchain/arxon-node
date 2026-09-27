@@ -149,6 +149,28 @@ fn unshield(
 	)
 }
 
+/// Adds one registry member and returns the new membership root.
+fn member_root(member: u8) -> FieldBytes {
+	assert_ok!(NoteTree::add_member(RuntimeOrigin::root(), fb(member)));
+	NoteTree::current_root(TreeId::Membership)
+}
+
+fn compliance(output_index: u8, registry_root: FieldBytes) -> Option<ComplianceAttachment> {
+	Some(ComplianceAttachment {
+		output_index,
+		registry_root,
+	})
+}
+
+/// The bundle digest every public input of the last verified Circuit 2 carried.
+fn verified_digest() -> FieldBytes {
+	FakeVerifier::calls()
+		.into_iter()
+		.find(|c| c.circuit_id == CircuitId::BalanceIntegrity)
+		.expect("C2 verified")
+		.public_inputs[0][7]
+}
+
 fn last_digest() -> FieldBytes {
 	System::events()
 		.into_iter()
@@ -1197,15 +1219,14 @@ fn private_transfer_fails_with_receipt_index_past_the_outputs() {
 fn private_transfer_with_compliance_verifies_circuit_6_against_the_membership_root() {
 	new_test_ext().execute_with(|| {
 		let anchor = shielded_note(1, 2);
-		assert_ok!(NoteTree::add_member(RuntimeOrigin::root(), fb(0x70)));
-		let root = NoteTree::current_root(TreeId::Membership);
+		let root = member_root(0x70);
 		FakeVerifier::reset();
 
 		assert_ok!(transfer_with(
 			anchor,
 			outputs(vec![output(20, 21)]),
 			None,
-			Some(ComplianceAttachment { output_index: 0 }),
+			compliance(0, root),
 			full_bundle(false, true)
 		));
 
@@ -1227,6 +1248,7 @@ fn private_transfer_with_compliance_verifies_circuit_6_against_the_membership_ro
 fn private_transfer_fails_when_compliance_proof_rejected_and_writes_nothing() {
 	new_test_ext().execute_with(|| {
 		let anchor = shielded_note(1, 2);
+		let root = member_root(0x70);
 		FakeVerifier::reject_only(CircuitId::TrustRegistryMembership);
 
 		assert_noop!(
@@ -1234,7 +1256,7 @@ fn private_transfer_fails_when_compliance_proof_rejected_and_writes_nothing() {
 				anchor,
 				outputs(vec![output(20, 21)]),
 				None,
-				Some(ComplianceAttachment { output_index: 0 }),
+				compliance(0, root),
 				full_bundle(false, true)
 			),
 			pallet_zk_verifier::Error::<Test>::InvalidProof
@@ -1247,6 +1269,7 @@ fn private_transfer_fails_when_compliance_proof_rejected_and_writes_nothing() {
 fn circuits_are_verified_in_the_fixed_bundle_order() {
 	new_test_ext().execute_with(|| {
 		let anchor = shielded_note(1, 2);
+		let root = member_root(0x70);
 		FakeVerifier::reset();
 		let ptr = PtrAttachment {
 			payment_output_index: 0,
@@ -1257,7 +1280,7 @@ fn circuits_are_verified_in_the_fixed_bundle_order() {
 			anchor,
 			outputs(vec![output(20, 21)]),
 			Some(ptr),
-			Some(ComplianceAttachment { output_index: 0 }),
+			compliance(0, root),
 			full_bundle(true, true)
 		));
 
@@ -1273,4 +1296,142 @@ fn circuits_are_verified_in_the_fixed_bundle_order() {
 			]
 		);
 	});
+}
+
+// --- attachments are bound to the bundle -------------------------------------------------------
+
+#[test]
+fn compliance_accepts_a_superseded_but_recent_registry_root() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		let old_root = member_root(0x70);
+		let new_root = member_root(0x71);
+		assert_ne!(old_root, new_root);
+		FakeVerifier::reset();
+
+		assert_ok!(transfer_with(
+			anchor,
+			outputs(vec![output(20, 21)]),
+			None,
+			compliance(0, old_root),
+			full_bundle(false, true)
+		));
+
+		let c6 = FakeVerifier::calls()
+			.into_iter()
+			.find(|c| c.circuit_id == CircuitId::TrustRegistryMembership)
+			.expect("C6 verified");
+		assert_eq!(c6.public_inputs[0][0], old_root);
+	});
+}
+
+#[test]
+fn compliance_fails_with_an_unknown_registry_root() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		member_root(0x70);
+
+		assert_noop!(
+			transfer_with(
+				anchor,
+				outputs(vec![output(20, 21)]),
+				None,
+				compliance(0, fb(0x7f)),
+				full_bundle(false, true)
+			),
+			Error::<Test>::UnknownRegistryRoot
+		);
+	});
+}
+
+#[test]
+fn compliance_fails_with_a_non_canonical_registry_root() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+
+		assert_noop!(
+			transfer_with(
+				anchor,
+				outputs(vec![output(20, 21)]),
+				None,
+				compliance(0, FieldBytes([0xff; 32])),
+				full_bundle(false, true)
+			),
+			Error::<Test>::InvalidFieldElement
+		);
+	});
+}
+
+#[test]
+fn compliance_fails_when_its_output_index_points_past_the_outputs() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		let root = member_root(0x70);
+
+		assert_noop!(
+			transfer_with(
+				anchor,
+				outputs(vec![output(20, 21)]),
+				None,
+				compliance(1, root),
+				full_bundle(false, true)
+			),
+			Error::<Test>::InvalidOutputIndex
+		);
+	});
+}
+
+fn digest_of_transfer_with(ptr: Option<PtrAttachment>, compliance_root: Option<u8>) -> FieldBytes {
+	let mut digest = FieldBytes::ZERO;
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		let attachment = compliance_root.map(|member| ComplianceAttachment {
+			output_index: 0,
+			registry_root: member_root(member),
+		});
+		FakeVerifier::reset();
+		assert_ok!(transfer_with(
+			anchor,
+			outputs(vec![output(20, 21)]),
+			ptr,
+			attachment,
+			full_bundle(ptr.is_some(), attachment.is_some())
+		));
+		digest = verified_digest();
+	});
+	digest
+}
+
+#[test]
+fn stripping_the_receipt_changes_the_digest_the_proofs_must_carry() {
+	let ptr = PtrAttachment {
+		payment_output_index: 0,
+		ptr_id: fb(0x50),
+	};
+
+	assert_ne!(
+		digest_of_transfer_with(Some(ptr), None),
+		digest_of_transfer_with(None, None)
+	);
+}
+
+#[test]
+fn stripping_the_compliance_attestation_changes_the_digest_the_proofs_must_carry() {
+	assert_ne!(
+		digest_of_transfer_with(None, Some(0x70)),
+		digest_of_transfer_with(None, None)
+	);
+}
+
+#[test]
+fn retargeting_the_receipt_id_changes_the_digest_the_proofs_must_carry() {
+	let ptr = |id| PtrAttachment {
+		payment_output_index: 0,
+		ptr_id: fb(id),
+	};
+
+	assert_ne!(
+		digest_of_transfer_with(Some(ptr(0x50)), None),
+		digest_of_transfer_with(Some(ptr(0x51)), None)
+	);
 }

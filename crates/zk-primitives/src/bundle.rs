@@ -44,6 +44,10 @@ pub struct BundleFields<'a> {
 	pub mask_bits: u8,
 	/// [`encrypted_notes_hash`] of the encrypted note payloads, in bundle order.
 	pub encrypted_notes_hash: [u8; 32],
+	/// Receipt attachment `(payment_output_index, ptr_id)`, so a relayer cannot strip it.
+	pub receipt: Option<(u8, FieldBytes)>,
+	/// Compliance attachment `(output_index, registry_root)`, so a relayer cannot strip it.
+	pub compliance: Option<(u8, FieldBytes)>,
 }
 
 impl BundleFields<'_> {
@@ -62,6 +66,8 @@ impl BundleFields<'_> {
 		self.cv_outputs.encode_to(&mut out);
 		self.mask_bits.encode_to(&mut out);
 		self.encrypted_notes_hash.encode_to(&mut out);
+		self.receipt.encode_to(&mut out);
+		self.compliance.encode_to(&mut out);
 		out
 	}
 }

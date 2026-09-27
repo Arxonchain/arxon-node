@@ -35,7 +35,7 @@ pub const C2_OUTPUTS: usize = 2;
 pub const SHIELDED_UNIT: u128 = 1_000_000_000;
 
 /// Domain prefix of the bundle digest.
-pub const BUNDLE_DOMAIN: &[u8] = b"arxon/bundle/v1";
+pub const BUNDLE_DOMAIN: &[u8] = b"arxon/bundle/v2";
 
 /// Pallas base field modulus `p` as 32 little-endian bytes.
 /// `p = 0x40000000000000000000000000000000224698fc094cf91b992d30ed00000001`.

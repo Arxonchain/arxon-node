@@ -17,6 +17,9 @@ polkadot.*
 .DS_Store
 .cargo-remote.toml
 
+# Local node and build logs
+*.log
+
 # Editors
 .vscode
 .idea/

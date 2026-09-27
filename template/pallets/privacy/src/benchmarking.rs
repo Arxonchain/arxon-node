@@ -32,9 +32,14 @@ mod benchmarks {
 		assert!(HideBalanceAccounts::<T>::get(&caller));
 	}
 
+	/// Worst case: the caller replaces a key it registered before, which also
+	/// frees the old key's owner entry.
 	#[benchmark]
 	fn register_shielded_key() {
 		let caller: T::AccountId = whitelisted_caller();
+		let old = FieldBytes::from_u64(0x01d);
+		Pallet::<T>::register_shielded_key(RawOrigin::Signed(caller.clone()).into(), old)
+			.expect("fresh key");
 		let pk = FieldBytes::from_u64(0x5e1f);
 
 		#[extrinsic_call]
@@ -42,6 +47,7 @@ mod benchmarks {
 
 		assert_eq!(Pallet::<T>::shielded_key(&caller), Some(pk));
 		assert_eq!(Pallet::<T>::shielded_key_owner(&pk), Some(caller));
+		assert_eq!(Pallet::<T>::shielded_key_owner(&old), None);
 	}
 
 	impl_benchmark_test_suite!(Pallet, crate::mock::new_test_ext(), crate::mock::Test);

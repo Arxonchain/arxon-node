@@ -149,7 +149,7 @@ Next:
 ## Community
 
 * Website: [arxon.io](https://arxon.io)
-* Twitter: [@Arxonarx](https://twitter.com/Arxonarx)
+* Twitter: [@Arxonarx](https://twitter.com/Arxoninfra)
 * Mining app: [arxonchain.xyz](https://arxonchain.xyz)
 
 ## License

@@ -972,8 +972,22 @@ pub mod pallet {
 				&Self::instances([balance].into_iter())?,
 			)?;
 			if let (Some(ptr), Some(proof)) = (&intent.ptr, &intent.proofs.receipt) {
+				// The receipt's sender must own every spent note (both nullifier slots,
+				// the first one twice in a one-input bundle) and its receiver the paid note.
 				let payment = &intent.outputs[ptr.payment_output_index as usize];
-				let receipt = C4PublicInputs::new(ptr.ptr_id, payment.cv, digest, expiry);
+				let first = intent
+					.inputs
+					.first()
+					.ok_or(Error::<T>::ProofBundleMismatch)?;
+				let second = intent.inputs.get(1).unwrap_or(first);
+				let receipt = C4PublicInputs::new(
+					ptr.ptr_id,
+					payment.cv,
+					payment.cm,
+					[first.nullifier, second.nullifier],
+					digest,
+					expiry,
+				);
 				T::ZkVerifier::verify_proof(
 					CircuitId::PtrGeneration,
 					proof,

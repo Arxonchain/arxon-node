@@ -173,3 +173,12 @@ fn c5_proof_for_one_audience_does_not_verify_for_another() {
 		Err(VerifyError::InvalidProof)
 	);
 }
+
+#[test]
+fn c5_disclosure_mask_of_16_fails_the_mask_lookup() {
+	let w = c5(16);
+
+	let failures = assert_unsatisfied(&mock_honest::<C5Circuit>(&w));
+
+	assert_has_lookup_failure(&failures);
+}

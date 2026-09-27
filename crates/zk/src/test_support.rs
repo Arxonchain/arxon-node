@@ -259,13 +259,36 @@ pub mod fixtures {
 		cv_dummy()
 	}
 
-	/// A receipt for the 42-unit payment of [`c1`].
+	/// Spending key of the receipt sender in [`c4`] and [`c5`].
+	pub fn sender_sk() -> Fp {
+		fe(50)
+	}
+
+	/// A receipt for the 42-unit payment of [`c1`], in a bundle spending two of the
+	/// sender's notes (30 and 12 units).
 	pub fn c4() -> C4Witness {
+		use arxon_zk_primitives::poseidon::{hash_cv, hash_nk, hash_pk};
+
+		use crate::circuits::SpentNote;
+
 		let payment = c1(0);
 		C4Witness {
-			pk_s: fe(50),
+			pk_s: hash_pk(sender_sk()),
+			nk: hash_nk(sender_sk()),
+			spent: [
+				SpentNote {
+					amount: 30,
+					rho: fe(52),
+				},
+				SpentNote {
+					amount: 12,
+					rho: fe(53),
+				},
+			],
 			pk_r: payment.pk_r,
-			cv: arxon_zk_primitives::poseidon::hash_cv(payment.amount, payment.blinding),
+			amount: payment.amount,
+			rho_out: payment.rho,
+			cv: hash_cv(payment.amount, payment.blinding),
 			nonce: fe(51),
 			bundle_digest: digest(),
 			expiry_block: EXPIRY,
@@ -276,7 +299,7 @@ pub mod fixtures {
 	pub fn c5(disclosure_mask: u8) -> C5Witness {
 		let payment = c1(0);
 		C5Witness {
-			pk_s: fe(50),
+			pk_s: arxon_zk_primitives::poseidon::hash_pk(sender_sk()),
 			pk_r: payment.pk_r,
 			amount: payment.amount,
 			blinding: payment.blinding,

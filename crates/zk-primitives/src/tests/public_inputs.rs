@@ -134,13 +134,13 @@ fn c3_new_rejects_invalid_mask() {
 }
 
 #[test]
-fn c4_public_inputs_to_elements_has_len_5_in_documented_order() {
-	let rows = C4PublicInputs::new(fb(1), fb(2), fb(7), 100).to_elements();
+fn c4_public_inputs_to_elements_has_len_8_in_documented_order() {
+	let rows = C4PublicInputs::new(fb(1), fb(2), fb(3), [fb(4), fb(5)], fb(7), 100).to_elements();
 
 	assert_eq!(rows.len(), CircuitId::PtrGeneration.public_input_len());
-	assert_eq!(&rows[..3], &[fb(1), fb(2), fb(7)]);
-	assert_eq!(rows[3], chain_id_row());
-	assert_eq!(rows[4], FieldBytes::from_u32(100));
+	assert_eq!(&rows[..6], &[fb(1), fb(2), fb(3), fb(4), fb(5), fb(7)]);
+	assert_eq!(rows[6], chain_id_row());
+	assert_eq!(rows[7], FieldBytes::from_u32(100));
 }
 
 #[test]
@@ -184,7 +184,7 @@ fn c6_public_inputs_to_elements_has_len_5_in_documented_order() {
 #[test]
 fn every_layout_roundtrips_through_from_elements() {
 	let c2 = C2PublicInputs::new([fb(1), fb(2)], [fb(3), fb(4)], 1, 2, 3, fb(7), 1);
-	let c4 = C4PublicInputs::new(fb(1), fb(2), fb(7), 1);
+	let c4 = C4PublicInputs::new(fb(1), fb(2), fb(3), [fb(4), fb(5)], fb(7), 1);
 	let c6 = C6PublicInputs::new(fb(1), fb(2), fb(7), 1);
 
 	assert_eq!(

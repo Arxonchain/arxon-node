@@ -1114,7 +1114,7 @@ fn any_signer_can_relay_a_bundle() {
 // --- receipts and compliance -------------------------------------------------------------------
 
 #[test]
-fn private_transfer_with_receipt_verifies_circuit_4_against_the_payment_output_cv() {
+fn private_transfer_with_receipt_binds_circuit_4_to_the_payment_output_and_the_spends() {
 	new_test_ext().execute_with(|| {
 		let anchor = shielded_note(1, 2);
 		FakeVerifier::reset();
@@ -1135,8 +1135,47 @@ fn private_transfer_with_receipt_verifies_circuit_4_against_the_payment_output_c
 			.into_iter()
 			.find(|c| c.circuit_id == CircuitId::PtrGeneration)
 			.expect("C4 verified");
-		assert_eq!(c4.public_inputs[0][0], fb(0x50), "ptr id");
-		assert_eq!(c4.public_inputs[0][1], fb(23), "cv of output 1");
+		let rows = &c4.public_inputs[0];
+		assert_eq!(rows[0], fb(0x50), "ptr id");
+		assert_eq!(rows[1], fb(23), "cv of output 1");
+		assert_eq!(rows[2], fb(22), "cm of output 1");
+		assert_eq!(
+			[rows[3], rows[4]],
+			[fb(10), fb(10)],
+			"a one-input bundle repeats its nullifier"
+		);
+	});
+}
+
+#[test]
+fn receipt_of_a_two_input_transfer_carries_both_nullifiers_to_circuit_4() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		FakeVerifier::reset();
+
+		assert_ok!(Privacy::submit_private_transfer(
+			RuntimeOrigin::signed(RELAYER),
+			anchor,
+			inputs(vec![input(10, 11), input(12, 13)]),
+			outputs(vec![output(20, 21)]),
+			0,
+			EXPIRY,
+			Some(PtrAttachment {
+				payment_output_index: 0,
+				ptr_id: fb(0x50),
+			}),
+			None,
+			full_bundle(true, false),
+		));
+
+		let c4 = FakeVerifier::calls()
+			.into_iter()
+			.find(|c| c.circuit_id == CircuitId::PtrGeneration)
+			.expect("C4 verified");
+		assert_eq!(
+			[c4.public_inputs[0][3], c4.public_inputs[0][4]],
+			[fb(10), fb(12)]
+		);
 	});
 }
 

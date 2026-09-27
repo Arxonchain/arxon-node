@@ -108,13 +108,13 @@ fn main() {
 	let c3 = spend_witnesses(&spends, &ctx);
 	let c1 = output_witnesses(&outputs, &ctx);
 	let c2 = balance_witness(&spends, &outputs, &ctx);
-	let c4 = receipt.generation_witness(&ctx);
+	let c4 = receipt.generation_witness(&spends, &ctx);
 	let c5 = receipt.disclosure_witness(0b0011, Fp::from(99), ctx.expiry_block);
 	let c6 = membership_witness(&outputs[0], registry.path(member_index), &ctx);
 
 	println!("warming up proving and verifying keys...");
 	let start = Instant::now();
-	arxon_zk::key_cache::warm_up();
+	arxon_zk::key_cache::warm_up().expect("verifying keys match VK_HASHES");
 	println!("keys ready in {:.1?}\n", start.elapsed());
 
 	let rows = vec![
@@ -152,11 +152,26 @@ fn main() {
 	println!("\nverifying key hashes:");
 	arxon_zk::circuits::for_each_chain_circuit!(|C| {
 		let pins = measure::<C>();
-		println!("  {:<30} {}", pins.name, hex::encode(pins.vk_hash));
+		let frozen = arxon_zk::primitives::vk_hash(C::ID.expect("chain circuit"));
+		let ok = pins.vk_hash == frozen;
+		failed |= !ok;
+		println!(
+			"  {:<30} {}{}",
+			pins.name,
+			hex::encode(pins.vk_hash),
+			if ok {
+				""
+			} else {
+				"  <-- differs from VK_HASHES"
+			}
+		);
 	});
 
 	if failed {
-		eprintln!("\nsome proof exceeded MAX_PROOF_BYTES ({MAX_PROOF_BYTES}) or missed its pin");
+		eprintln!(
+			"\na proof exceeded MAX_PROOF_BYTES ({MAX_PROOF_BYTES}), missed its pinned length, \
+			 or a verifying key drifted from VK_HASHES"
+		);
 		std::process::exit(1);
 	}
 }

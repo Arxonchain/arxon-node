@@ -141,8 +141,9 @@ fn receipt_witnesses_satisfy_circuits_4_and_5_and_agree_on_ptr_id() {
 	let payment = OutputNote::new(bob.pk(), 40, &mut rng);
 	let receipt = Receipt::new(&alice, payment, &mut rng);
 	let ctx = ctx(0, 0, 0);
+	let spends = alice_spends(&alice, &[30, 12], &mut rng);
 
-	let c4 = receipt.generation_witness(&ctx);
+	let c4 = receipt.generation_witness(&spends, &ctx);
 	let c5 = receipt.disclosure_witness(0b0011, Fp::from(99), 60);
 
 	assert_satisfied(&mock_honest::<crate::circuits::C4Circuit>(&c4));
@@ -150,6 +151,55 @@ fn receipt_witnesses_satisfy_circuits_4_and_5_and_agree_on_ptr_id() {
 	assert_eq!(c4.ptr_id(), c5.ptr_id());
 	assert_eq!(c4.ptr_id(), receipt.ptr_id());
 	assert_eq!(c4.cv, payment.cv());
+	assert_eq!(c4.cm(), payment.note.commitment());
+	assert_eq!(
+		c4.nullifiers().map(|n| fp_to_bytes(&n)),
+		[spends[0].nullifier_bytes(), spends[1].nullifier_bytes()]
+	);
+}
+
+#[test]
+fn receipt_of_a_one_input_bundle_repeats_its_nullifier_in_both_slots() {
+	let mut rng = deterministic_rng(10);
+	let alice = SpendingKey::random(&mut rng);
+	let payment = OutputNote::new(alice.pk(), 5, &mut rng);
+	let receipt = Receipt::new(&alice, payment, &mut rng);
+	let spends = alice_spends(&alice, &[5], &mut rng);
+
+	let c4 = receipt.generation_witness(&spends, &ctx(0, 0, 0));
+
+	assert_eq!(c4.nullifiers()[0], c4.nullifiers()[1]);
+	assert_satisfied(&mock_honest::<crate::circuits::C4Circuit>(&c4));
+}
+
+#[test]
+#[should_panic(expected = "the receipt's sender must own every spent note")]
+fn receipt_refuses_a_spend_of_another_key() {
+	let mut rng = deterministic_rng(11);
+	let alice = SpendingKey::random(&mut rng);
+	let mallory = SpendingKey::random(&mut rng);
+	let payment = OutputNote::new(alice.pk(), 5, &mut rng);
+	let receipt = Receipt::new(&alice, payment, &mut rng);
+	let spends = alice_spends(&mallory, &[5], &mut rng);
+
+	receipt.generation_witness(&spends, &ctx(0, 0, 0));
+}
+
+/// Spends of fresh notes of `owner` with the given amounts, from one tree.
+fn alice_spends(
+	owner: &SpendingKey,
+	amounts: &[u64],
+	rng: &mut impl rand_core::RngCore,
+) -> Vec<SpendNote> {
+	let mut tree = crate::merkle::NoteTree::new(TreeKind::Note);
+	amounts
+		.iter()
+		.map(|amount| {
+			let note = Note::new(owner.pk(), *amount, rng);
+			let index = tree.insert(note.commitment());
+			SpendNote::new(*owner, note, tree.path(index), rng)
+		})
+		.collect()
 }
 
 #[test]

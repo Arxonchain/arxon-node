@@ -71,7 +71,7 @@ impl CircuitId {
 			CircuitId::PrivacyFlagEnforcement => 8,
 			CircuitId::BalanceIntegrity => 10,
 			CircuitId::NullifierDerivation => 8,
-			CircuitId::PtrGeneration => 5,
+			CircuitId::PtrGeneration => 8,
 			CircuitId::DisclosureProof => 8,
 			CircuitId::TrustRegistryMembership => 5,
 		}

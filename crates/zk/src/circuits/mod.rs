@@ -19,7 +19,7 @@ use arxon_zk_primitives::CircuitId;
 pub use c1_privacy_flags::{C1Circuit, C1Public, C1Witness};
 pub use c2_balance::{C2Circuit, C2Public, C2Witness};
 pub use c3_nullifier::{C3Circuit, C3Public, C3Witness};
-pub use c4_ptr::{C4Circuit, C4Public, C4Witness};
+pub use c4_ptr::{C4Circuit, C4Public, C4Witness, SpentNote};
 pub use c5_disclosure::{C5Circuit, C5Public, C5Witness};
 pub use c6_membership::{C6Circuit, C6Public, C6Witness};
 

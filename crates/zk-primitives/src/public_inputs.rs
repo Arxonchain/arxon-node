@@ -325,13 +325,20 @@ impl PublicInputLayout for C3PublicInputs {
 	}
 }
 
-/// Circuit 4, single instance.
+/// Circuit 4, single instance. The pallet fills every row from the bundle: the
+/// payment output's `cv` and `cm`, and the input nullifiers (slot 1 repeats slot 0
+/// in a one-input bundle), so the receipt's sender is the owner of every spent
+/// note and its receiver the owner of the paid note.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct C4PublicInputs {
 	/// `H_PTR(pk_s, pk_r, cv, nonce)`.
 	pub ptr_id: FieldBytes,
-	/// Value commitment of the payment output (Circuit 1 instance chosen by the extrinsic).
+	/// Value commitment of the payment output.
 	pub cv: FieldBytes,
+	/// Note commitment of the payment output.
+	pub cm: FieldBytes,
+	/// Nullifiers of the bundle's input slots.
+	pub nullifiers: [FieldBytes; 2],
 	/// Bundle digest.
 	pub bundle_digest: FieldBytes,
 	/// Chain id (7171).
@@ -345,12 +352,16 @@ impl C4PublicInputs {
 	pub fn new(
 		ptr_id: FieldBytes,
 		cv: FieldBytes,
+		cm: FieldBytes,
+		nullifiers: [FieldBytes; 2],
 		bundle_digest: FieldBytes,
 		expiry_block: u32,
 	) -> Self {
 		C4PublicInputs {
 			ptr_id,
 			cv,
+			cm,
+			nullifiers,
 			bundle_digest,
 			chain_id: chain_id_row(),
 			expiry_block: FieldBytes::from_u32(expiry_block),
@@ -360,12 +371,15 @@ impl C4PublicInputs {
 
 impl PublicInputLayout for C4PublicInputs {
 	const CIRCUIT: CircuitId = CircuitId::PtrGeneration;
-	const LEN: usize = 5;
+	const LEN: usize = 8;
 
 	fn to_elements(&self) -> Vec<FieldBytes> {
 		alloc::vec![
 			self.ptr_id,
 			self.cv,
+			self.cm,
+			self.nullifiers[0],
+			self.nullifiers[1],
 			self.bundle_digest,
 			self.chain_id,
 			self.expiry_block
@@ -379,9 +393,11 @@ impl PublicInputLayout for C4PublicInputs {
 		Some(C4PublicInputs {
 			ptr_id: r[0],
 			cv: r[1],
-			bundle_digest: r[2],
-			chain_id: r[3],
-			expiry_block: r[4],
+			cm: r[2],
+			nullifiers: [r[3], r[4]],
+			bundle_digest: r[5],
+			chain_id: r[6],
+			expiry_block: r[7],
 		})
 	}
 }

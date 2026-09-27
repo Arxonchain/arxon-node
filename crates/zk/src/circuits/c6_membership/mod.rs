@@ -140,6 +140,8 @@ impl Circuit<Fp> for C6Circuit {
 		cfg.load_tables(&mut layouter)?;
 
 		let pk_member = cfg.witness(&mut layouter, "pk_member", self.pk_member)?;
+		// No range check: the pallet forces `cm` to be an output of the bundle, whose
+		// opening Circuit 1 range-checks, so collision resistance bounds `amount`.
 		let amount = cfg.witness(&mut layouter, "amount", self.amount)?;
 		let rho = cfg.witness(&mut layouter, "rho", self.rho)?;
 

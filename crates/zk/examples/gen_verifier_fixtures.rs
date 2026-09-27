@@ -81,7 +81,7 @@ fn main() {
 	let c3 = spend_witnesses(&spends, &ctx);
 	let c1 = output_witnesses(&outputs, &ctx);
 	let c2 = balance_witness(&spends, &outputs, &ctx);
-	let c4 = receipt.generation_witness(&ctx);
+	let c4 = receipt.generation_witness(&spends, &ctx);
 	let c5 = receipt.disclosure_witness(0b0011, Fp::from(99), ctx.expiry_block);
 	let c6 = membership_witness(&outputs[0], registry.path(member_index), &ctx);
 

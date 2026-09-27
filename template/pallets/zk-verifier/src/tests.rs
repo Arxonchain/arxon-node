@@ -316,3 +316,29 @@ fn migration_does_nothing_on_a_chain_created_with_the_pallet() {
 		);
 	});
 }
+
+#[test]
+fn migration_updates_a_stale_hash_and_keeps_the_enabled_flag() {
+	use frame_support::traits::{OnRuntimeUpgrade, StorageVersion};
+
+	crate::mock::new_test_ext().execute_with(|| {
+		crate::Circuits::<crate::mock::Test>::insert(
+			CircuitId::PtrGeneration,
+			crate::CircuitConfig {
+				enabled: false,
+				vk_hash: [9u8; 32],
+			},
+		);
+		StorageVersion::new(0).put::<crate::Pallet<crate::mock::Test>>();
+
+		crate::migrations::V0ToV1::<crate::mock::Test>::on_runtime_upgrade();
+
+		let config =
+			crate::Circuits::<crate::mock::Test>::get(CircuitId::PtrGeneration).expect("kept");
+		assert_eq!(config.vk_hash, vk_hash(CircuitId::PtrGeneration));
+		assert!(
+			!config.enabled,
+			"the governance decision survives the upgrade"
+		);
+	});
+}

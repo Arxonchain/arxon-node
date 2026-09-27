@@ -173,10 +173,9 @@ fn prove_bundle_with(
 		.then(|| proof_of(prove::<C1Circuit>(&output_witnesses(outputs, &ctx), OsRng).unwrap()));
 	let balance =
 		proof_of(prove::<C2Circuit>(&[balance_witness(spends, outputs, &ctx)], OsRng).unwrap());
-	let receipt = attachments
-		.receipt
-		.as_ref()
-		.map(|(_, r)| proof_of(prove::<C4Circuit>(&[r.generation_witness(&ctx)], OsRng).unwrap()));
+	let receipt = attachments.receipt.as_ref().map(|(_, r)| {
+		proof_of(prove::<C4Circuit>(&[r.generation_witness(spends, &ctx)], OsRng).unwrap())
+	});
 	let compliance = attachments.membership.as_ref().map(|(i, path)| {
 		proof_of(
 			prove::<C6Circuit>(

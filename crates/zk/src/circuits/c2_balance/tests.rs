@@ -256,3 +256,51 @@ fn c2_verify_rejects_wrong_transparent_amount() {
 		Err(VerifyError::InvalidProof)
 	);
 }
+
+/// The transparent and fee rows are public, so an attacker picks them freely:
+/// each one must be range-checked, or a field wraparound could mint value.
+fn raw_public_values_are_rejected(t_in: Fp, t_out: Fp, fee: Fp, v_out0: Fp) {
+	let w = c2_shield();
+	let circuit = C2Circuit::with_raw_amounts(
+		&w,
+		[Fp::ZERO, Fp::ZERO],
+		[v_out0, Fp::ZERO],
+		t_in,
+		t_out,
+		fee,
+	);
+	let mut rows = rows_of(&w);
+	rows[rows::CV_OUT[0]] = arxon_zk_primitives::poseidon::sponge_hash::<
+		arxon_zk_primitives::poseidon::ArxonDomain<{ arxon_zk_primitives::constants::tags::CV }, 2>,
+	>(&[v_out0, w.r_out[0]]);
+	rows[rows::TRANSPARENT_IN] = t_in;
+	rows[rows::TRANSPARENT_OUT] = t_out;
+	rows[rows::FEE] = fee;
+
+	let failures =
+		assert_unsatisfied(&MockProver::run(C2Circuit::K, &circuit, vec![rows]).unwrap());
+
+	assert_has_lookup_failure(&failures);
+}
+
+#[test]
+fn c2_transparent_in_of_2_pow_64_fails_range_lookup() {
+	let two_pow_64 = Fp::from(u64::MAX) + Fp::ONE;
+	raw_public_values_are_rejected(
+		two_pow_64 + Fp::from(42),
+		Fp::ZERO,
+		Fp::ZERO,
+		two_pow_64 + Fp::from(42),
+	);
+}
+
+#[test]
+fn c2_negative_transparent_out_fails_range_lookup() {
+	// 42 in = 43 out + (-1): balances in the field, mints one unit.
+	raw_public_values_are_rejected(Fp::from(42), -Fp::ONE, Fp::ZERO, Fp::from(43));
+}
+
+#[test]
+fn c2_negative_fee_fails_range_lookup() {
+	raw_public_values_are_rejected(Fp::from(42), Fp::ZERO, -Fp::ONE, Fp::from(43));
+}

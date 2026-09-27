@@ -17,7 +17,7 @@ pub const VK_HASHES: [[u8; 32]; 6] = [
 	// 3 NullifierDerivation
 	hex_literal("aa29c3035a33e25f644249be23cb76cbafb6da94e550e85fdd417b78e6a182a4"),
 	// 4 PtrGeneration
-	hex_literal("1cb2ba13232989084598bd6460756b092e297f96e03bd32f85f65f233eb9ac23"),
+	hex_literal("1cfefe2151af9a08c72fd38430a2a5d42586fef4d6a4225039be744ca507f7e6"),
 	// 5 DisclosureProof
 	hex_literal("68fe69f4ad847c48452dd4e3ed31f135c7326192c9898d15557e8d20b60c4a50"),
 	// 6 TrustRegistryMembership

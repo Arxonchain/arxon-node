@@ -13,7 +13,7 @@ use ff::Field;
 use rand_core::RngCore;
 
 use crate::{
-	circuits::{C1Witness, C2Witness, C3Witness, C4Witness, C5Witness, C6Witness},
+	circuits::{C1Witness, C2Witness, C3Witness, C4Witness, C5Witness, C6Witness, SpentNote},
 	field::Fp,
 	gadgets::merkle::MerklePath,
 };
@@ -288,11 +288,34 @@ impl Receipt {
 		fp_to_bytes(&self.ptr_id())
 	}
 
-	/// Circuit 4 witness for the bundle that pays this receipt.
-	pub fn generation_witness(&self, ctx: &BundleContext) -> C4Witness {
+	/// Circuit 4 witness for the bundle that pays this receipt, which spends `spends`.
+	///
+	/// # Panics
+	/// If `spends` is empty, holds more than `C2_INPUTS` notes, or any of them is
+	/// not the sender's: Circuit 4 proves the sender owns every spent note.
+	pub fn generation_witness(&self, spends: &[SpendNote], ctx: &BundleContext) -> C4Witness {
+		assert!(
+			(1..=C2_INPUTS).contains(&spends.len()),
+			"a receipt needs 1 to {C2_INPUTS} spends"
+		);
+		assert!(
+			spends.iter().all(|s| s.sk.pk() == self.pk_s),
+			"the receipt's sender must own every spent note"
+		);
+		let slot = |i: usize| {
+			let note = spends.get(i).unwrap_or(&spends[0]).note;
+			SpentNote {
+				amount: note.amount,
+				rho: note.rho,
+			}
+		};
 		C4Witness {
 			pk_s: self.pk_s,
+			nk: spends[0].sk.nk(),
+			spent: [slot(0), slot(1)],
 			pk_r: self.payment.note.pk,
+			amount: self.payment.note.amount,
+			rho_out: self.payment.note.rho,
 			cv: self.payment.cv(),
 			nonce: self.nonce,
 			bundle_digest: ctx.bundle_digest,

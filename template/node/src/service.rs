@@ -19,9 +19,7 @@ use sp_consensus_aura::sr25519::{AuthorityId as AuraId, AuthorityPair as AuraPai
 use sp_core::{H256, U256};
 use sp_runtime::traits::{Block as BlockT, NumberFor};
 // Runtime
-use arxon_runtime::{
-	opaque::Block, AccountId, Balance, Nonce, RuntimeApi, TransactionConverter,
-};
+use arxon_runtime::{opaque::Block, AccountId, Balance, Nonce, RuntimeApi, TransactionConverter};
 
 pub use crate::eth::{db_config_dir, EthConfiguration};
 use crate::{
@@ -121,11 +119,11 @@ where
 
 	// Halo2 proving and verifying keys are derived deterministically on first
 	// use; build them now so the first block carrying a proof does not pay for it.
-	task_manager.spawn_handle().spawn_blocking(
-		"arxon-zk-warm-up",
-		None,
-		async { arxon_zk::key_cache::warm_up() },
-	);
+	task_manager
+		.spawn_handle()
+		.spawn_blocking("arxon-zk-warm-up", None, async {
+			arxon_zk::key_cache::warm_up()
+		});
 	let client = Arc::new(client);
 
 	let telemetry = telemetry.map(|(worker, telemetry)| {

@@ -556,8 +556,7 @@ mod test {
 		// Backend
 		let backend = builder.backend();
 		// Client
-		let (client, _) =
-			builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
+		let (client, _) = builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		// Overrides
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
@@ -759,8 +758,7 @@ mod test {
 		// Backend
 		let backend = builder.backend();
 		// Client
-		let (client, _) =
-			builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
+		let (client, _) = builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		// Overrides
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
@@ -963,8 +961,7 @@ mod test {
 		// Backend
 		let backend = builder.backend();
 		// Client
-		let (client, _) =
-			builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
+		let (client, _) = builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		// Overrides
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
@@ -1129,8 +1126,7 @@ mod test {
 		// Backend
 		let backend = builder.backend();
 		// Client
-		let (client, _) =
-			builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
+		let (client, _) = builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		// Overrides
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
@@ -1275,8 +1271,7 @@ mod test {
 			Encode::encode(&EthereumStorageSchema::V3),
 		);
 		let backend = builder.backend();
-		let (client, _) =
-			builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
+		let (client, _) = builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
 		let indexer_backend = fc_db::sql::Backend::new(
@@ -1376,8 +1371,7 @@ mod test {
 			Encode::encode(&EthereumStorageSchema::V3),
 		);
 		let backend = builder.backend();
-		let (client, _) =
-			builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
+		let (client, _) = builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
 		let indexer_backend = fc_db::sql::Backend::new(
@@ -1491,8 +1485,7 @@ mod test {
 			Encode::encode(&EthereumStorageSchema::V3),
 		);
 		let backend = builder.backend();
-		let (client, _) =
-			builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
+		let (client, _) = builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
 		let indexer_backend = fc_db::sql::Backend::new(
@@ -1592,8 +1585,7 @@ mod test {
 			Encode::encode(&EthereumStorageSchema::V3),
 		);
 		let backend = builder.backend();
-		let (client, _) =
-			builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
+		let (client, _) = builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
 		let indexer_backend = fc_db::sql::Backend::new(
@@ -1707,8 +1699,7 @@ mod test {
 			Encode::encode(&EthereumStorageSchema::V3),
 		);
 		let backend = builder.backend();
-		let (client, _) =
-			builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
+		let (client, _) = builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
 		let indexer_backend = fc_db::sql::Backend::new(
@@ -1808,8 +1799,7 @@ mod test {
 			Encode::encode(&EthereumStorageSchema::V3),
 		);
 		let backend = builder.backend();
-		let (client, _) =
-			builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
+		let (client, _) = builder.build_with_native_executor::<arxon_runtime::RuntimeApi, _>(None);
 		let client = Arc::new(client);
 		let storage_override = Arc::new(SchemaV3StorageOverride::new(client.clone()));
 		let indexer_backend = fc_db::sql::Backend::new(

@@ -36,9 +36,9 @@ sp-consensus = { workspace = true }
 sp-io = { workspace = true }
 substrate-test-runtime-client = { workspace = true }
 # Frontier
+arxon-runtime = { workspace = true, features = ["default"] }
 fc-api = { workspace = true }
 fc-db = { workspace = true }
-arxon-runtime = { workspace = true, features = ["default"] }
 
 [features]
 default = []

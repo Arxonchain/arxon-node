@@ -11,7 +11,7 @@ use sp_core::{Pair, Public, H160, U256};
 use sp_runtime::traits::{IdentifyAccount, Verify};
 // Frontier
 use arxon_runtime::{
-	AccountId, SS58Prefix, Signature, WASM_BINARY, ARXON_EVM_CHAIN_ID, ARX_DECIMALS, ARX_UNIT,
+	AccountId, SS58Prefix, Signature, ARXON_EVM_CHAIN_ID, ARX_DECIMALS, ARX_UNIT, WASM_BINARY,
 };
 
 // The URL for the telemetry server.
@@ -66,11 +66,26 @@ pub fn development_config(enable_manual_seal: bool) -> ChainSpec {
 			AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
 			// Pre-funded accounts
 			vec![
-				(AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), 300_000_000u128 * ARX_UNIT), // Treasury 30%
-				(AccountId::from(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")), 250_000_000u128 * ARX_UNIT), // Mining Pool 25%
-				(AccountId::from(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")), 200_000_000u128 * ARX_UNIT), // Investors 20%
-				(AccountId::from(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")), 150_000_000u128 * ARX_UNIT), // Team 15%
-				(AccountId::from(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")), 100_000_000u128 * ARX_UNIT), // Staking 10%
+				(
+					AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
+					300_000_000u128 * ARX_UNIT,
+				), // Treasury 30%
+				(
+					AccountId::from(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")),
+					250_000_000u128 * ARX_UNIT,
+				), // Mining Pool 25%
+				(
+					AccountId::from(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")),
+					200_000_000u128 * ARX_UNIT,
+				), // Investors 20%
+				(
+					AccountId::from(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")),
+					150_000_000u128 * ARX_UNIT,
+				), // Team 15%
+				(
+					AccountId::from(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")),
+					100_000_000u128 * ARX_UNIT,
+				), // Staking 10%
 			],
 			// Initial PoA authorities from well-known //Alice seed. DEV ONLY.
 			vec![authority_keys_from_seed("Alice")],
@@ -93,11 +108,26 @@ pub fn local_testnet_config() -> ChainSpec {
 			AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
 			// Pre-funded accounts
 			vec![
-				(AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), 300_000_000u128 * ARX_UNIT), // Treasury 30%
-				(AccountId::from(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")), 250_000_000u128 * ARX_UNIT), // Mining Pool 25%
-				(AccountId::from(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")), 200_000_000u128 * ARX_UNIT), // Investors 20%
-				(AccountId::from(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")), 150_000_000u128 * ARX_UNIT), // Team 15%
-				(AccountId::from(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")), 100_000_000u128 * ARX_UNIT), // Staking 10%
+				(
+					AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
+					300_000_000u128 * ARX_UNIT,
+				), // Treasury 30%
+				(
+					AccountId::from(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")),
+					250_000_000u128 * ARX_UNIT,
+				), // Mining Pool 25%
+				(
+					AccountId::from(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")),
+					200_000_000u128 * ARX_UNIT,
+				), // Investors 20%
+				(
+					AccountId::from(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")),
+					150_000_000u128 * ARX_UNIT,
+				), // Team 15%
+				(
+					AccountId::from(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")),
+					100_000_000u128 * ARX_UNIT,
+				), // Staking 10%
 			],
 			vec![
 				authority_keys_from_seed("Alice"),

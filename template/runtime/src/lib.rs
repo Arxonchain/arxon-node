@@ -143,12 +143,21 @@ pub type CheckedExtrinsic =
 pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
 
 /// Executive: handles dispatch to the various modules.
+/// Migrations of the zero-knowledge upgrade (spec 2) for chains that ran spec 1.
+/// Each one is versioned and does nothing on a chain created with spec 2.
+pub type Migrations = (
+	pallet_zk_verifier::migrations::V0ToV1<Runtime>,
+	pallet_note_tree::migrations::V0ToV1<Runtime>,
+	pallet_ptr::migrations::V0ToV1<Runtime>,
+);
+
 pub type Executive = frame_executive::Executive<
 	Runtime,
 	Block,
 	frame_system::ChainContext<Runtime>,
 	Runtime,
 	AllPalletsWithSystem,
+	Migrations,
 >;
 
 // Time is measured by number of blocks.
@@ -1095,11 +1104,11 @@ impl_runtime_apis! {
 			NullifierRegistry::is_spent(&arxon_zk_primitives::FieldBytes(nullifier))
 		}
 
-		fn leaf_count(tree: u8) -> u64 {
+		fn leaf_count(tree: u8) -> Option<u64> {
 			match tree {
-				0 => NoteTree::leaf_count(pallet_note_tree::TreeId::Note),
-				1 => NoteTree::leaf_count(pallet_note_tree::TreeId::Membership),
-				_ => 0,
+				0 => Some(NoteTree::leaf_count(pallet_note_tree::TreeId::Note)),
+				1 => Some(NoteTree::leaf_count(pallet_note_tree::TreeId::Membership)),
+				_ => None,
 			}
 		}
 

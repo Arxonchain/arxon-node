@@ -145,7 +145,7 @@ mod tests {
 
 	#[test]
 	fn warm_up_builds_keys_for_every_wired_circuit() {
-		crate::key_cache::warm_up();
+		assert_eq!(crate::key_cache::warm_up(), Ok(()));
 
 		assert!(crate::key_cache::cached_count() >= WIRED.len());
 	}

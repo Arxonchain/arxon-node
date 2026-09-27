@@ -16,7 +16,7 @@ use crate::{
 	circuit::{ArxonCircuit, PublicRows},
 	error::VerifyError,
 	field::{rows_from_bytes, Curve, Fp},
-	key_cache::keys,
+	key_cache::verifier_key,
 	params::params,
 	pins::expected_proof_len,
 };
@@ -33,11 +33,14 @@ pub fn verify<C: ArxonCircuit + 'static>(
 	let halo2_instances: Vec<&[&[Fp]]> = columns.iter().map(|c| c.as_slice()).collect();
 
 	let params = params(C::K);
-	let keys = keys::<C>();
+	let key = verifier_key::<C>();
+	if !key.matches_pin {
+		return Err(VerifyError::KeyMismatch);
+	}
 	let mut transcript = Blake2bRead::<&[u8], Curve, Challenge255<Curve>>::init(proof);
 	verify_proof(
 		params,
-		&keys.vk,
+		&key.vk,
 		SingleVerifier::new(params),
 		&halo2_instances,
 		&mut transcript,

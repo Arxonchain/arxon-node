@@ -261,7 +261,7 @@ pallet-ptr = { path = "template/pallets/ptr", default-features = false }
 pallet-quantum-account = { path = "template/pallets/quantum-account", default-features = false }
 pallet-trust-registry = { path = "template/pallets/trust-registry", default-features = false }
 # Arxon ZK crates
-arxon-zk = { path = "crates/zk" }
+arxon-zk = { path = "crates/zk", default-features = false }
 arxon-zk-host = { path = "template/primitives/zk-host", default-features = false }
 arxon-zk-primitives = { path = "crates/zk-primitives", default-features = false }
 arxon-zk-runtime-api = { path = "template/primitives/zk-runtime-api", default-features = false }

@@ -76,4 +76,8 @@ pub enum VerifyError {
 	/// The proof does not verify.
 	#[error("invalid proof")]
 	InvalidProof,
+	/// This build's verifying key differs from the frozen hash: the node refuses
+	/// every proof of the circuit rather than verify a different statement.
+	#[error("verifying key does not match its frozen hash")]
+	KeyMismatch,
 }

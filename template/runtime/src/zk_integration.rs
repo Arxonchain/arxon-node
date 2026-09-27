@@ -431,7 +431,9 @@ fn runtime_api_reports_the_shielded_pool_state() {
 			Runtime::membership_root(),
 			NoteTree::root(TreeId::Membership).0
 		);
-		assert_eq!(Runtime::leaf_count(0), 0);
+		assert_eq!(Runtime::leaf_count(0), Some(0));
+		assert_eq!(Runtime::leaf_count(1), Some(0));
+		assert_eq!(Runtime::leaf_count(2), None);
 		assert!(!Runtime::is_nullifier_spent([7u8; 32]));
 		assert!(Runtime::circuit_enabled(1));
 		assert!(Runtime::circuit_enabled(3));

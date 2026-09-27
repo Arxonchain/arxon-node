@@ -18,8 +18,8 @@ sp_api::decl_runtime_apis! {
 		fn is_known_note_root(root: [u8; 32]) -> bool;
 		/// `true` iff `nullifier` was spent.
 		fn is_nullifier_spent(nullifier: [u8; 32]) -> bool;
-		/// Number of leaves in the note tree (`tree = 0`) or the membership tree (`tree = 1`).
-		fn leaf_count(tree: u8) -> u64;
+		/// Leaves in tree `tree` (`0` note, `1` membership); `None` for any other id.
+		fn leaf_count(tree: u8) -> Option<u64>;
 		/// `true` iff proofs of `circuit_id` (wire id 1..=6) are currently accepted.
 		fn circuit_enabled(circuit_id: u8) -> bool;
 	}

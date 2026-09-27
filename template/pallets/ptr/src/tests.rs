@@ -250,3 +250,39 @@ fn disclose_requires_signed_origin() {
 		);
 	});
 }
+
+// --- migration ---------------------------------------------------------------------------------
+
+#[test]
+fn migration_deletes_the_plaintext_receipts_and_codes_of_version_0() {
+	use frame_support::{
+		storage::{storage_prefix, unhashed},
+		traits::{GetStorageVersion, OnRuntimeUpgrade, PalletInfoAccess, StorageVersion},
+	};
+
+	new_test_ext().execute_with(|| {
+		let pallet = <Ptr as PalletInfoAccess>::name().as_bytes();
+		let old_key = |item: &[u8]| {
+			let mut key = storage_prefix(pallet, item).to_vec();
+			key.extend_from_slice(&[7u8; 48]);
+			key
+		};
+		for item in crate::migrations::REMOVED_ITEMS {
+			unhashed::put_raw(&old_key(item), b"plaintext party and amount");
+		}
+		crate::TotalReceipts::<Test>::put(9);
+		StorageVersion::new(0).put::<Ptr>();
+
+		crate::migrations::V0ToV1::<Test>::on_runtime_upgrade();
+
+		for item in crate::migrations::REMOVED_ITEMS {
+			assert_eq!(
+				unhashed::get_raw(&old_key(item)),
+				None,
+				"{item:?} left behind"
+			);
+		}
+		assert_eq!(crate::TotalReceipts::<Test>::get(), 0);
+		assert_eq!(Ptr::on_chain_storage_version(), 1);
+	});
+}

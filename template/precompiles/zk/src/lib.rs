@@ -112,6 +112,8 @@ where
 	#[precompile::public("getTrustRegistryRoot()")]
 	#[precompile::view]
 	fn get_trust_registry_root(handle: &mut impl PrecompileHandle) -> EvmResult<H256> {
+		// Current root, or the genesis empty root before the first insert.
+		handle.record_db_read::<R>(32)?;
 		handle.record_db_read::<R>(32)?;
 		Ok(H256(
 			pallet_note_tree::Pallet::<R>::current_root(TreeId::Membership).0,
@@ -122,6 +124,8 @@ where
 	#[precompile::public("getNoteTreeRoot()")]
 	#[precompile::view]
 	fn get_note_tree_root(handle: &mut impl PrecompileHandle) -> EvmResult<H256> {
+		// Current root, or the genesis empty root before the first insert.
+		handle.record_db_read::<R>(32)?;
 		handle.record_db_read::<R>(32)?;
 		Ok(H256(
 			pallet_note_tree::Pallet::<R>::current_root(TreeId::Note).0,
@@ -132,7 +136,8 @@ where
 	#[precompile::public("isKnownNoteRoot(bytes32)")]
 	#[precompile::view]
 	fn is_known_note_root(handle: &mut impl PrecompileHandle, root: H256) -> EvmResult<bool> {
-		handle.record_db_read::<R>(4)?;
+		// Blake2_128Concat key of the root (16 + 32 bytes) plus the u32 slot.
+		handle.record_db_read::<R>(52)?;
 		Ok(pallet_note_tree::Pallet::<R>::is_known_root(
 			TreeId::Note,
 			&FieldBytes(root.0),

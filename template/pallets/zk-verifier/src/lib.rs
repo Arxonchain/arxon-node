@@ -16,6 +16,7 @@
 extern crate alloc;
 
 pub use pallet::*;
+pub mod migrations;
 pub mod weights;
 
 #[cfg(feature = "runtime-benchmarks")]
@@ -118,7 +119,11 @@ pub mod pallet {
 		pub vk_hash: [u8; 32],
 	}
 
+	/// Version 1: the zero-knowledge layout of this pallet (version 0 is the chain before it).
+	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+
 	#[pallet::pallet]
+	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
 
 	#[pallet::config]

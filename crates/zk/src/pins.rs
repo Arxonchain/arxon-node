@@ -10,9 +10,8 @@
 //!   its size estimate is off by the instance evaluations.
 
 use halo2_proofs::dev::CircuitCost;
-use sp_crypto_hashing::blake2_256;
 
-use crate::{circuit::ArxonCircuit, key_cache::keys};
+use crate::{circuit::ArxonCircuit, key_cache::verifier_key};
 
 /// Everything pinned for one circuit.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,8 +30,7 @@ pub struct CircuitPins {
 
 /// Hash of the verifying key of `C`.
 pub fn vk_hash<C: ArxonCircuit + 'static>() -> [u8; 32] {
-	let keys = keys::<C>();
-	blake2_256(format!("{:?}", keys.vk.pinned()).as_bytes())
+	verifier_key::<C>().hash
 }
 
 /// halo2's structural cost report for `C` (diagnostic; not used for verification).

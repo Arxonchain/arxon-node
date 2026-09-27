@@ -11,7 +11,7 @@ use crate::{
 	circuit::{ArxonCircuit, PublicRows},
 	error::ProveError,
 	field::{Curve, Fp},
-	key_cache::keys,
+	key_cache::proving_key,
 	params::params,
 };
 
@@ -46,11 +46,11 @@ pub fn prove<C: ArxonCircuit + 'static>(
 	let columns: Vec<[&[Fp]; 1]> = rows.iter().map(|r| [r.as_slice()]).collect();
 	let instances: Vec<&[&[Fp]]> = columns.iter().map(|c| c.as_slice()).collect();
 
-	let keys = keys::<C>();
+	let pk = proving_key::<C>();
 	let mut transcript = Blake2bWrite::<Vec<u8>, Curve, Challenge255<Curve>>::init(Vec::new());
 	create_proof(
 		params(C::K),
-		&keys.pk,
+		&*pk,
 		&circuits,
 		&instances,
 		rng,

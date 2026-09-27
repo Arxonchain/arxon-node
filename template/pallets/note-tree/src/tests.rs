@@ -290,3 +290,37 @@ fn add_member_rejects_duplicate_member() {
 		);
 	});
 }
+
+// --- views and migration -----------------------------------------------------------------------
+
+#[test]
+fn root_of_an_empty_tree_does_not_write_storage() {
+	new_test_ext().execute_with(|| {
+		assert!(crate::Zeros::<Test>::get(TreeId::Note, 0).is_none());
+
+		let root = NoteTree::root(TreeId::Note);
+
+		assert_eq!(hex::encode(root.0), NOTE_EMPTY_ROOT);
+		assert!(
+			crate::Zeros::<Test>::get(TreeId::Note, 0).is_none(),
+			"a view must not cache anything"
+		);
+	});
+}
+
+#[test]
+fn migration_builds_the_empty_subtree_chains_of_both_trees() {
+	use frame_support::traits::{GetStorageVersion, OnRuntimeUpgrade, StorageVersion};
+
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(0).put::<NoteTree>();
+
+		crate::migrations::V0ToV1::<Test>::on_runtime_upgrade();
+
+		let note = crate::Zeros::<Test>::get(TreeId::Note, 32).expect("built");
+		let member = crate::Zeros::<Test>::get(TreeId::Membership, 16).expect("built");
+		assert_eq!(hex::encode(note.0), NOTE_EMPTY_ROOT);
+		assert_eq!(hex::encode(member.0), MEMBER_EMPTY_ROOT);
+		assert_eq!(NoteTree::on_chain_storage_version(), 1);
+	});
+}

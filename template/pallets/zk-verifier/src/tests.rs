@@ -267,3 +267,52 @@ fn verify_weight_grows_with_instances() {
 		assert!(two.ref_time() > one.ref_time());
 	});
 }
+
+// --- migration ---------------------------------------------------------------------------------
+
+#[test]
+fn migration_registers_every_circuit_on_a_chain_without_them() {
+	use frame_support::traits::{GetStorageVersion, OnRuntimeUpgrade, StorageVersion};
+
+	crate::mock::new_test_ext_without_circuits().execute_with(|| {
+		StorageVersion::new(0).put::<crate::Pallet<crate::mock::Test>>();
+
+		crate::migrations::V0ToV1::<crate::mock::Test>::on_runtime_upgrade();
+
+		for id in CircuitId::ALL {
+			let config = crate::Circuits::<crate::mock::Test>::get(id).expect("registered");
+			assert!(config.enabled);
+			assert_eq!(config.vk_hash, vk_hash(id));
+		}
+		assert_eq!(
+			crate::Pallet::<crate::mock::Test>::on_chain_storage_version(),
+			1
+		);
+	});
+}
+
+#[test]
+fn migration_does_nothing_on_a_chain_created_with_the_pallet() {
+	use frame_support::traits::{GetStorageVersion, OnRuntimeUpgrade};
+
+	crate::mock::new_test_ext().execute_with(|| {
+		assert_ok!(crate::Pallet::<crate::mock::Test>::set_circuit_enabled(
+			frame_system::RawOrigin::Root.into(),
+			CircuitId::PtrGeneration,
+			false
+		));
+		assert_eq!(
+			crate::Pallet::<crate::mock::Test>::on_chain_storage_version(),
+			1
+		);
+
+		crate::migrations::V0ToV1::<crate::mock::Test>::on_runtime_upgrade();
+
+		assert!(
+			!crate::Circuits::<crate::mock::Test>::get(CircuitId::PtrGeneration)
+				.expect("registered")
+				.enabled,
+			"a disabled circuit stays disabled"
+		);
+	});
+}

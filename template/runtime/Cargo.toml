@@ -87,7 +87,7 @@ polkadot-runtime-common = { workspace = true }
 cumulus-pallet-weight-reclaim = { workspace = true }
 
 [dev-dependencies]
-arxon-zk = { workspace = true }
+arxon-zk = { workspace = true, features = ["multicore"] }
 rand_core = { workspace = true, features = ["getrandom"] }
 sp-io = { workspace = true, features = ["default"] }
 

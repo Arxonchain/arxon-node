@@ -23,6 +23,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub use pallet::*;
+pub mod migrations;
 pub mod weights;
 
 #[cfg(feature = "runtime-benchmarks")]
@@ -129,7 +130,11 @@ pub mod pallet {
 
 	use super::{weights::WeightInfo, MerkleHasher, MerkleTree, TreeId};
 
+	/// Version 1: the zero-knowledge layout of this pallet (version 0 is the chain before it).
+	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+
 	#[pallet::pallet]
+	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
 
 	#[pallet::config]
@@ -262,9 +267,25 @@ pub mod pallet {
 		}
 
 		/// Current root (the empty root before the first insert).
+		///
+		/// Never writes: callable from views (runtime API, EVM static calls). The
+		/// empty root comes from the `Zeros` built at genesis (or by the migration),
+		/// and is recomputed in memory if they are missing.
 		pub fn root(tree: TreeId) -> FieldBytes {
 			CurrentRoot::<T>::get(tree)
-				.unwrap_or_else(|| Self::empty_root(tree).unwrap_or(FieldBytes::ZERO))
+				.or_else(|| Zeros::<T>::get(tree, tree.depth()))
+				.unwrap_or_else(|| Self::empty_root_in_memory(tree))
+		}
+
+		fn empty_root_in_memory(tree: TreeId) -> FieldBytes {
+			let mut current = FieldBytes::ZERO;
+			for _ in 0..tree.depth() {
+				match T::Hasher::hash_two(tree, &current, &current) {
+					Some(next) => current = next,
+					None => return FieldBytes::ZERO,
+				}
+			}
+			current
 		}
 
 		/// Number of leaves.

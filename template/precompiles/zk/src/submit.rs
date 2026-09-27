@@ -95,7 +95,9 @@ pub struct ArxonZkSubmitPrecompile<R>(PhantomData<R>);
 #[precompile_utils::precompile]
 impl<R> ArxonZkSubmitPrecompile<R>
 where
-	R: pallet_evm::Config + pallet_privacy::Config,
+	R: pallet_evm::Config
+		+ pallet_privacy::Config
+		+ frame_system::Config<AccountId = pallet_evm::AccountIdOf<R>>,
 	R::RuntimeCall:
 		Dispatchable<PostInfo = PostDispatchInfo> + GetDispatchInfo + From<pallet_privacy::Call<R>>,
 	<R::RuntimeCall as Dispatchable>::RuntimeOrigin: From<RawOrigin<pallet_evm::AccountIdOf<R>>>,
@@ -212,7 +214,7 @@ fn signed_origin<R>(
 	handle: &impl PrecompileHandle,
 ) -> <R::RuntimeCall as Dispatchable>::RuntimeOrigin
 where
-	R: pallet_evm::Config,
+	R: pallet_evm::Config + frame_system::Config<AccountId = pallet_evm::AccountIdOf<R>>,
 	<R::RuntimeCall as Dispatchable>::RuntimeOrigin: From<RawOrigin<pallet_evm::AccountIdOf<R>>>,
 {
 	let who = R::AddressMapping::into_account_id(handle.context().caller);

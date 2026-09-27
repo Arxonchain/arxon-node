@@ -44,7 +44,7 @@ where
 impl<R> PrecompileSet for FrontierPrecompiles<R>
 where
 	R: pallet_evm::Config
-		+ frame_system::Config
+		+ frame_system::Config<AccountId = pallet_evm::AccountIdOf<R>>
 		+ pallet_zk_verifier::Config
 		+ pallet_nullifier_registry::Config
 		+ pallet_note_tree::Config

@@ -7,12 +7,17 @@
 //! Storage keeps the identifier, the payment value commitment, the block and
 //! the bundle mask: nothing a chain observer can read parties or amounts from.
 //!
-//! A receipt holder opens it selectively with [`Pallet::disclose`]: a Circuit 5
-//! proof reveals any subset of sender, receiver and amount, bound to the
-//! *account that submits the disclosure* (`audience`), so a disclosure made for
-//! one auditor cannot be replayed to anyone else. This replaces the single-use
-//! disclosure codes: the holder can produce as many audience-bound proofs as
-//! it wants, off chain, and none of them leaks beyond its audience.
+//! A receipt holder opens it selectively with a Circuit 5 proof that reveals
+//! any subset of sender, receiver and amount to an `audience` (the digest of
+//! the auditor's account). This replaces the single-use disclosure codes:
+//!
+//! * a private disclosure is the proof handed to the auditor off chain, who
+//!   verifies it through the `0x800` precompile (an `eth_call`) or the host
+//!   function; nothing is published;
+//! * [`Pallet::disclose`] records it on chain as an attestation by the auditor
+//!   who signs. The revealed fields are extrinsic arguments and event data, so
+//!   they become public; the audience binding only stops another account from
+//!   reusing the proof on chain.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 

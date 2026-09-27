@@ -43,7 +43,7 @@ pub struct SubstrateWeight<T>(PhantomData<T>);
 
 /// Ref time the pallet spends outside storage and primitives per bundle: SCALE
 /// work on the arguments and the blake2 bundle digest over at most a few KiB.
-/// A fixed margin, deliberately above what a 24 core desktop measures.
+/// A fixed margin, deliberately above what the benchmark laptop measures.
 const BUNDLE_COMPUTE: u64 = 200_000_000;
 
 impl<T: Config> SubstrateWeight<T> {

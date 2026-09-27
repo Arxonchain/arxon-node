@@ -20,8 +20,9 @@
 //!
 //! The extrinsic signer only pays the fee; it is deliberately absent from the
 //! bundle digest so any relayer can submit a bundle. Shielded amounts are `u64`
-//! multiples of `ShieldedUnit` base units. `hide_balance` is enforced here
-//! (`HideBalanceAccounts`), not in the circuits.
+//! multiples of `ShieldedUnit` base units. `hide_balance` (bit 3) has no
+//! meaning in the circuits: it is recorded with the bundle mask, and
+//! `HideBalanceAccounts` is a separate opt-in flag set by `set_balance_visibility`.
 //!
 //! Wire ids: call index 1 (`record_tx_privacy`) is burned; it let anyone paint
 //! flags on any hash and is gone.

@@ -4,7 +4,9 @@ Clone branch `stable2512`. Read this once before writing circuits or changing th
 
 Status on branch `zk/selective-privacy` (September 2026): the six Halo2 circuits, the three ZK pallets, the host function, the privacy and PTR rewrites, the `0x800` precompile and the quantum account tests are implemented and tested. The sections below keep the original requirements and record, per item, what was delivered and where it deviates. The root `README.md` section "Selective privacy with ZK" is the user facing summary.
 
-Remaining after this delivery: EVM submission precompile `0x801` (separate increment), weights re-measured on reference hardware, wallet SDK and mobile prover, public network keys.
+Remaining after this delivery: EVM submission precompile `0x801` (separate increment), weights re-measured on reference hardware, wallet SDK and mobile prover, a key ownership proof for `register_shielded_key`, removal from the membership tree, public network keys. The post quantum items listed below are outside this delivery's scope.
+
+Upgrading the live testnet: roll the new `arxon-node` binary out to every node before `set_code` (the runtime imports the `verify_halo2_ipa` host function). Spec 2 migrates the new pallets' state; see the README section "Upgrading a running chain".
 
 ---
 
@@ -60,8 +62,10 @@ All of these live under `template/pallets/<name>/` and are registered in `templa
 **Index 15. PTR** (`template/pallets/ptr/src/lib.rs`)
 
 * Receipts are commitments `ReceiptCommitment { cv, block_number, mask_bits }` keyed by `ptr_id = H_PTR(pk_s, pk_r, cv, nonce)`, recorded by `pallet-privacy` when a private transfer attaches a Circuit 4 proof.
-* `disclose(ptr_id, disclosure_mask, revealed, expiry_block, proof)`: the signer opens the receipt with a Circuit 5 proof whose `audience` row is the signer's digest, so the proof cannot be replayed to a third party. Revealed parties resolve to accounts through the shielded key registry.
-* Plaintext receipts, `create_receipt` and disclosure codes are gone. No migration for previous data (dev and local testnet only).
+* Circuit 4 proves at payment time that the receipt's sender owns every note the bundle spends and its receiver owns the paid note, so a receipt cannot name anyone else.
+* Private disclosure: the holder gives the auditor a Circuit 5 proof off chain, and the auditor verifies it with an `eth_call` to `0x800`.
+* On chain disclosure: `disclose(ptr_id, disclosure_mask, revealed, expiry_block, proof)` records an attestation by the signing auditor. The Circuit 5 proof's `audience` row is the signer's digest, so another account cannot reuse it, but the revealed fields become public (they are extrinsic arguments and event data). Revealed parties resolve to accounts through the shielded key registry.
+* Plaintext receipts, `create_receipt` and disclosure codes are gone. The spec 2 migration deletes the old plaintext entries.
 
 **Index 16. Trust registry** (`template/pallets/trust-registry/src/lib.rs`)
 
@@ -73,7 +77,7 @@ All of these live under `template/pallets/<name>/` and are registered in `templa
 
 * See the post quantum section below.
 
-Frontier occupies indices 0 through 11 (system, timestamp, aura, grandpa, balances, payment, sudo, ethereum, evm, chain id, base fee, manual seal). Indices 18 (verifier), 19 (nullifier registry), and 20 (note / membership tree) are reserved for ZK. Index 16 stays anti-rug. Index 17 stays quantum accounts.
+Frontier occupies indices 0 through 11 (system, timestamp, aura, grandpa, balances, payment, sudo, ethereum, evm, chain id, base fee, manual seal). Indices 18 (verifier), 19 (nullifier registry), and 20 (note / membership tree) hold the ZK pallets. Index 16 stays anti-rug. Index 17 stays quantum accounts.
 
 Root README: `README.md`.
 
@@ -123,14 +127,17 @@ Delivered layout:
 | `template/pallets/note-tree` | `pallet-note-tree` | 20 (note tree depth 32 and membership tree depth 16 in one pallet, keyed by `TreeId`) |
 | `template/precompiles/zk` | `pallet-evm-precompile-arxon-zk` | `0x800` |
 
-Measured on a 24 core desktop (`make measure-zk`): single instance proofs are 3456 to 3584 bytes (two instance proofs up to 5088), proving 110 to 410 ms, verification 2 to 5 ms. Verifying key hashes are frozen in `arxon-zk-primitives::VK_HASHES` and asserted by tests; proof lengths are pinned per circuit and instance count and checked before the transcript is read.
+Measured on a 24 thread developer laptop (`make measure-zk`): single instance proofs are 3456 to 3584 bytes (two instance proofs up to 5088), and wallet proving takes 130 to 500 ms. Nodes verify single threaded in 10 to 31 ms per proof (benchmarked weights). Verifying key hashes are frozen in `arxon-zk-primitives::VK_HASHES`, asserted by tests, and checked by every node against the keys it builds; proof lengths are pinned per circuit and instance count and checked before the transcript is read.
 
-Deviations agreed with the product owner:
+Deviations, for product sign-off:
 
 * Value commitments are Poseidon `cv = H_CV(amount, blinding)` instead of Pedersen. Conservation is proven inside Circuit 2 by opening the four commitments; no ECC chip, smaller circuits.
 * `0x800` stays view only as listed below. EVM submission goes to a separate `0x801` precompile (not started, separate approval).
 * The extrinsic signer is visible and pays the fee in v1; the bundle digest excludes the signer so relayers work. The `fee` public row is fixed at 0.
-* `hide_balance` (bit 3) has no in circuit effect; the pallet records it.
+* `hide_balance` (bit 3) has no in circuit effect. It is recorded with the bundle mask; `HideBalanceAccounts` is a separate opt in flag set by `set_balance_visibility`, and transparent balances stay public.
+* Circuit 1 carries no nullifier (Circuit 3 does) and the block window is a single `expiry_block` accepted in `[now, now + 128]`.
+* The note tree is an append only incremental Merkle tree, not a sparse Merkle tree.
+* `pallet-zk-verifier` has no `verify` extrinsic: it is the `VerifyProof` service the pallets call, reachable publicly through `0x800`.
 * One proof per circuit per bundle with up to 2 instances (2 in / 2 out), so a full private transfer is 3 proofs.
 
 Product model to freeze before Circuit 1: **selective privacy**. The user chooses, per transaction, which of the four fields to hide or reveal (`hide_sender`, `hide_receiver`, `hide_amount`, `hide_balance`), matching `PrivacyMask` and the litepaper. Any combination is valid. Do not collapse this into three modes (`PUBLIC` / `SEMI_PRIVATE` / `FULLY_PRIVATE`) unless product signs that change. IARX20 (draft only, not in this repo) uses the same four flags.
@@ -141,9 +148,7 @@ Proofs must bind to chain ID **7171**, never 42. SS58 prefix 42 is an address fo
 
 Circuit 1 mask packing is frozen in `PrivacyMask::as_bits` (`template/pallets/privacy/src/lib.rs`): bit 0 hide_sender, bit 1 hide_receiver, bit 2 hide_amount, bit 3 hide_balance.
 
-EVM precompile address `0x800` is reserved in `template/runtime/src/precompiles.rs` (`ARXON_ZK_PRECOMPILE`). Calls revert with `ARXON_ZK_PRECOMPILE_RESERVED` until the verifier is implemented. Do not deploy a contract there.
-
-Runtime pallet indices 18 (verifier), 19 (nullifier registry), and 20 (note / membership tree) are reserved in comments in `template/runtime/src/lib.rs`. Index 16 stays anti-rug. Index 17 stays quantum accounts.
+Original: EVM precompile address `0x800` was reserved with a revert stub, and runtime indices 18 to 20 were reserved in comments. Delivered: the precompile and the three pallets now occupy them (see the delivered bullets below). Index 16 stays anti-rug. Index 17 stays quantum accounts.
 
 ### Circuit 1. PrivacyFlagEnforcement (build this first)
 
@@ -172,7 +177,7 @@ Runtime pallet indices 18 (verifier), 19 (nullifier registry), and 20 (note / me
 * On-chain id: Poseidon of keys, amount commitment, nonce.
 * Replaces plaintext receipts in `pallet-ptr`.
 * Witness stays off chain or encrypted.
-* Delivered (`c4_ptr`, K 9): rows `ptr_id, cv, bundle_digest, chain_id, expiry_block`. The pallet forces `cv` to equal the value commitment of the output named by `PtrAttachment.payment_output_index`.
+* Delivered (`c4_ptr`, K 9): rows `ptr_id, cv, cm, nullifier_0, nullifier_1, bundle_digest, chain_id, expiry_block`. The pallet sets `cv` and `cm` to the output named by `PtrAttachment.payment_output_index`, and the two nullifier rows to the bundle's inputs (the first one twice for a one-input bundle). The circuit proves `pk_r` owns that `cm` and that `pk_s` and its nullifier key derive both nullifiers, so the receipt names the real parties.
 
 ### Circuit 5. DisclosureProof
 
@@ -195,7 +200,7 @@ Runtime pallet indices 18 (verifier), 19 (nullifier registry), and 20 (note / me
 * Update `pallet-privacy` so a private transfer without a valid Circuit 1 proof is rejected.
 * Rewrite `pallet-ptr` to commitments.
 * Hook a real private-transfer extrinsic **and** an EVM path so flags cannot be painted onto unrelated hashes. Both paths verify Circuit 1–6 against the same pool.
-* Delivered: all of the above except the EVM submission path (`0x801`, pending). The note tree is an append only Poseidon Merkle tree with `KnownLeaves` duplicate rejection and a 1024 root history; Poseidon runs inside the runtime Wasm for inserts, verification runs natively through the host function only. Circuits can be disabled by governance (`set_circuit_enabled`), VK hashes are genesis constants.
+* Delivered: all of the above except the EVM submission path (`0x801`, pending). The note tree is an append only Poseidon Merkle tree with `KnownLeaves` duplicate rejection and a history of the roots of the last 65536 inserts; Poseidon runs inside the runtime Wasm for inserts, verification runs natively through the host function only. Circuits can be disabled by governance (`set_circuit_enabled`). VK hashes are the frozen constants of the running code, set at genesis and by the spec 2 migration.
 
 ### Crypto parameters
 
@@ -203,7 +208,7 @@ Runtime pallet indices 18 (verifier), 19 (nullifier registry), and 20 (note / me
 * Commitment: IPA, no trusted setup.
 * Hash: Poseidon over Pallas, width 3, 8 full / 56 partial rounds, alpha 5.
 * Target: proof under 5KB, prove under a few seconds on mobile, verify fast via the host function.
-* Delivered: Pasta with IPA (`halo2_proofs` 0.3.5, `halo2_gadgets` 0.5.0, `halo2_poseidon` 0.1.0), Poseidon `P128Pow5T3` with domain tags in the capacity element. Single instance proofs 3456 to 3584 bytes. Mobile proving is not measured yet; desktop proving is 110 to 410 ms.
+* Delivered: Pasta with IPA (`halo2_proofs` 0.3.5, `halo2_gadgets` 0.5.0, `halo2_poseidon` 0.1.0), Poseidon `P128Pow5T3` with domain tags in the capacity element. Single instance proofs 3456 to 3584 bytes. Mobile proving is not measured yet; laptop proving is 130 to 500 ms.
 
 ### EVM (same selective privacy, second submission path)
 
@@ -222,7 +227,7 @@ Runtime pallet indices 18 (verifier), 19 (nullifier registry), and 20 (note / me
 * Constraint-count regression in CI.
 * Soundness tests on invalid witnesses.
 * Measured weights, not hardcoded guesses.
-* Delivered: replay (chain id constant in every VK, expiry window, bundle digest), front running (digest binds recipient and nullifiers), malleability (exact proof length pins, canonical field decoding), constraint regression (VK hash and proof length pins asserted in `make test`), soundness (a failing witness test per constraint and a tamper test per public row). Weights: pallets 13, 15, 18, 19, 20 have `#[benchmarks]` modules and weights measured through `arxon-node benchmark pallet` on a developer desktop (verification 3 to 6 ms per proof, note tree insert 5.1 ms); bundle extrinsics compose the measured primitives. Re-run `make benchmark-zk` on the reference hardware before mainnet.
+* Delivered: replay (chain id constant in every VK, expiry window, bundle digest), front running (digest binds recipient and nullifiers), malleability (exact proof length pins, canonical field decoding), constraint regression (VK hash and proof length pins asserted in `make test`), soundness (a failing witness test per constraint and a tamper test per public row). Front running also covers attachments: the digest binds the receipt and compliance attachments, so a relayer cannot strip them. Weights: pallets 13, 15, 18, 19, 20 have `#[benchmarks]` modules and weights measured through `arxon-node benchmark pallet` on a developer laptop, with single threaded verification as the node runs it (10 to 31 ms per proof, note tree insert 3.6 ms); bundle extrinsics compose the measured primitives. Re-run `make benchmark-zk` on the reference hardware before mainnet.
 
 ### Out of ZK scope unless asked
 

@@ -298,6 +298,11 @@ pub mod pallet {
 			KnownLeaves::<T>::get(tree, leaf)
 		}
 
+		/// Leaf at `index`, if that slot is filled.
+		pub fn leaf_at(tree: TreeId, index: u64) -> Option<FieldBytes> {
+			KnownLeaves::<T>::iter_prefix(tree).find_map(|(leaf, idx)| (idx == index).then_some(leaf))
+		}
+
 		/// Appends `leaf`, updates the root and the root history, emits an event.
 		pub fn do_insert(tree: TreeId, leaf: &FieldBytes) -> Result<u64, DispatchError> {
 			ensure!(leaf.is_canonical(), Error::<T>::InvalidFieldElement);

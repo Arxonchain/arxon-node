@@ -15,6 +15,8 @@
 //! * `getTrustRegistryRoot() -> bytes32` (the membership tree, Circuit 6)
 //! * `getNoteTreeRoot() -> bytes32`
 //! * `isKnownNoteRoot(bytes32) -> bool` (accepted as an anchor right now)
+//! * `getNoteLeafCount() -> uint256`
+//! * `getNoteLeaf(uint256 index) -> bytes32`
 //!
 //! Gas: the verification methods charge the verifier weight converted through
 //! the runtime's `GasWeightMapping`, plus a storage read; the getters charge a
@@ -37,7 +39,7 @@ use pallet_note_tree::{MerkleTree, TreeId};
 use pallet_zk_verifier::{CircuitConfig, VerifyProof};
 use precompile_utils::prelude::*;
 use scale_codec::MaxEncodedLen;
-use sp_core::H256;
+use sp_core::{H256, U256};
 
 pub mod submit;
 
@@ -145,6 +147,33 @@ where
 			TreeId::Note,
 			&FieldBytes(root.0),
 		))
+	}
+
+	/// Number of commitments in the note tree.
+	#[precompile::public("getNoteLeafCount()")]
+	#[precompile::view]
+	fn get_note_leaf_count(handle: &mut impl PrecompileHandle) -> EvmResult<U256> {
+		handle.record_db_read::<R>(8)?;
+		Ok(U256::from(pallet_note_tree::Pallet::<R>::leaf_count(
+			TreeId::Note,
+		)))
+	}
+
+	/// Note commitment at `index` (insertion order).
+	#[precompile::public("getNoteLeaf(uint256)")]
+	#[precompile::view]
+	fn get_note_leaf(handle: &mut impl PrecompileHandle, index: U256) -> EvmResult<H256> {
+		let want = u64::try_from(index).map_err(|_| revert("leaf index"))?;
+		handle.record_db_read::<R>(8)?;
+		let count = pallet_note_tree::Pallet::<R>::leaf_count(TreeId::Note);
+		if want >= count {
+			return Err(revert("unknown leaf"));
+		}
+		handle.record_db_read::<R>(48usize.saturating_mul(count.max(1) as usize))?;
+		match pallet_note_tree::Pallet::<R>::leaf_at(TreeId::Note, want) {
+			Some(leaf) => Ok(H256(leaf.0)),
+			None => Err(revert("unknown leaf")),
+		}
 	}
 }
 

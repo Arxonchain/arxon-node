@@ -364,6 +364,14 @@ fn selectors_match_the_documented_signatures() {
 		PCall::is_known_note_root_selectors(),
 		&[compute_selector("isKnownNoteRoot(bytes32)")]
 	);
+	assert_eq!(
+		PCall::get_note_leaf_count_selectors(),
+		&[compute_selector("getNoteLeafCount()")]
+	);
+	assert_eq!(
+		PCall::get_note_leaf_selectors(),
+		&[compute_selector("getNoteLeaf(uint256)")]
+	);
 }
 
 #[test]
@@ -372,6 +380,26 @@ fn unknown_selector_reverts() {
 		precompiles()
 			.prepare_test(Alice, address(), vec![0xde, 0xad, 0xbe, 0xef])
 			.execute_reverts(|out| out.starts_with(b"Unknown selector") || !out.is_empty());
+	});
+}
+
+#[test]
+fn get_note_leaf_returns_inserted_commitment() {
+	new_test_ext().execute_with(|| {
+		let leaf = FieldBytes::from_u64(7);
+		assert_ok!(<NoteTree as MerkleTree>::insert(TreeId::Note, &leaf));
+		precompiles()
+			.prepare_test(Alice, address(), PCall::get_note_leaf_count {})
+			.execute_returns(U256::from(1u64));
+		precompiles()
+			.prepare_test(
+				Alice,
+				address(),
+				PCall::get_note_leaf {
+					index: U256::zero(),
+				},
+			)
+			.execute_returns(H256(leaf.0));
 	});
 }
 

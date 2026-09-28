@@ -14,6 +14,9 @@ RPC = "ws://127.0.0.1:9944"
 
 def spec_version(substrate: SubstrateInterface) -> int:
 	ver = substrate.rpc_request("state_getRuntimeVersion", [])
+	print("runtime rpc:", ver)
+	if isinstance(ver, dict) and "specVersion" not in ver:
+		ver = ver.get("result", ver)
 	return int(ver["specVersion"])
 
 

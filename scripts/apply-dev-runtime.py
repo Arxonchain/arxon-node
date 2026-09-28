@@ -12,6 +12,11 @@ WASM = Path("/root/arxon-node/target/release/wbuild/arxon-runtime/arxon_runtime.
 RPC = "ws://127.0.0.1:9944"
 
 
+def spec_version(substrate: SubstrateInterface) -> int:
+	ver = substrate.rpc_request("state_getRuntimeVersion", [])
+	return int(ver["specVersion"])
+
+
 def main() -> int:
 	if not WASM.is_file():
 		print("missing wasm:", WASM)
@@ -20,10 +25,10 @@ def main() -> int:
 	print("wasm bytes:", len(code))
 
 	substrate = SubstrateInterface(url=RPC)
-	before = substrate.get_runtime_version()
-	print("spec before:", before.get("specVersion"), "tx:", before.get("transactionVersion"))
+	before = spec_version(substrate)
+	print("spec before:", before)
 
-	if before.get("specVersion") == 3:
+	if before == 3:
 		print("already spec 3; nothing to do")
 		return 0
 
@@ -50,9 +55,10 @@ def main() -> int:
 		print("error:", receipt.error_message)
 		return 1
 
-	after = substrate.get_runtime_version()
-	print("spec after:", after.get("specVersion"))
-	return 0 if after.get("specVersion") == 3 else 2
+	substrate = SubstrateInterface(url=RPC)
+	after = spec_version(substrate)
+	print("spec after:", after)
+	return 0 if after == 3 else 2
 
 
 if __name__ == "__main__":

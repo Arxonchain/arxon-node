@@ -6,7 +6,7 @@ import sys
 
 from substrateinterface import Keypair, KeypairType, SubstrateInterface
 
-ALITH_PRIV = "0x5fb92d6e98884f76de468fa3f6278f39c9d24c4cbd5ca392cd5be10b6da7f7ba"
+ALITH_PRIV = "0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133"
 ALITH = "0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac"
 WASM = Path("/root/arxon-node/target/release/wbuild/arxon-runtime/arxon_runtime.compact.compressed.wasm")
 RPC = "ws://127.0.0.1:9944"
@@ -37,6 +37,9 @@ def main() -> int:
 
 	keypair = Keypair.create_from_private_key(ALITH_PRIV, crypto_type=KeypairType.ECDSA)
 	print("signer:", keypair.ss58_address, "expected", ALITH)
+	if keypair.ss58_address.lower() != ALITH.lower():
+		print("refusing to submit: signer is not Alith")
+		return 1
 
 	inner = substrate.compose_call(
 		call_module="System",

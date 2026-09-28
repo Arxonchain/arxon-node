@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""Apply the newly built runtime Wasm via sudo.set_code (dev Alith key)."""
+
+from pathlib import Path
+import sys
+
+from substrateinterface import Keypair, KeypairType, SubstrateInterface
+
+ALITH_PRIV = "0x5fb92d6e98884f76de468fa3f6278f39c9d24c4cbd5ca392cd5be10b6da7f7ba"
+ALITH = "0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac"
+WASM = Path("/root/arxon-node/target/release/wbuild/arxon-runtime/arxon_runtime.compact.compressed.wasm")
+RPC = "ws://127.0.0.1:9944"
+
+
+def main() -> int:
+	if not WASM.is_file():
+		print("missing wasm:", WASM)
+		return 1
+	code = WASM.read_bytes()
+	print("wasm bytes:", len(code))
+
+	substrate = SubstrateInterface(url=RPC)
+	before = substrate.get_runtime_version()
+	print("spec before:", before.get("specVersion"), "tx:", before.get("transactionVersion"))
+
+	if before.get("specVersion") == 3:
+		print("already spec 3; nothing to do")
+		return 0
+
+	keypair = Keypair.create_from_private_key(ALITH_PRIV, crypto_type=KeypairType.ECDSA)
+	print("signer:", keypair.ss58_address, "expected", ALITH)
+
+	inner = substrate.compose_call(
+		call_module="System",
+		call_function="set_code",
+		call_params={"code": "0x" + code.hex()},
+	)
+	call = substrate.compose_call(
+		call_module="Sudo",
+		call_function="sudo_unchecked_weight",
+		call_params={
+			"call": inner,
+			"weight": {"ref_time": 0, "proof_size": 0},
+		},
+	)
+	extrinsic = substrate.create_signed_extrinsic(call=call, keypair=keypair)
+	receipt = substrate.submit_extrinsic(extrinsic, wait_for_inclusion=True)
+	print("extrinsic:", receipt.extrinsic_hash, "finalized:", receipt.is_success)
+	if not receipt.is_success:
+		print("error:", receipt.error_message)
+		return 1
+
+	after = substrate.get_runtime_version()
+	print("spec after:", after.get("specVersion"))
+	return 0 if after.get("specVersion") == 3 else 2
+
+
+if __name__ == "__main__":
+	sys.exit(main())

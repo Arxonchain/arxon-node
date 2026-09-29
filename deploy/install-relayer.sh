@@ -1,0 +1,24 @@
+#!/bin/bash
+set -euo pipefail
+SRC=/root/arxon-node/deploy
+UNIT=/etc/systemd/system
+
+test -f "$SRC/relayer.py"
+test -x /root/arxon-node/target/release/arxon-node
+python3 -c "from eth_account import Account"
+
+cp "$SRC/relayer.py" /root/relayer.py
+cp "$SRC/run-relayer.sh" /root/run-relayer
+cp "$SRC/run-tunnel.sh" /root/run-tunnel
+chmod 755 /root/run-relayer /root/run-tunnel /root/relayer.py
+cp "$SRC/arxon-relayer.service" "$UNIT/arxon-relayer.service"
+cp "$SRC/arxon-tunnel.service" "$UNIT/arxon-tunnel.service"
+chmod 644 "$UNIT/arxon-relayer.service" "$UNIT/arxon-tunnel.service"
+systemctl daemon-reload
+systemctl enable arxon-relayer.service
+systemctl restart arxon-relayer.service
+systemctl restart arxon-tunnel.service
+echo relayer
+systemctl is-active arxon-relayer
+echo tunnel
+systemctl is-active arxon-tunnel

@@ -1,0 +1,18 @@
+[Unit]
+Description=Arxon node (dev Alice validator, RPC on localhost)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/arxon-node
+ExecStart=/bin/sh /root/run-node
+Restart=always
+RestartSec=4
+LimitNOFILE=65536
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

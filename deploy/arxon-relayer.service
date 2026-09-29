@@ -1,0 +1,17 @@
+[Unit]
+Description=Arxon 0x801 fee relayer plus RPC front on 8787
+After=network-online.target arxon-node.service
+Wants=network-online.target arxon-node.service
+
+[Service]
+Type=simple
+User=root
+ExecStartPre=/bin/sleep 2
+ExecStart=/bin/sh /root/run-relayer
+Restart=always
+RestartSec=4
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

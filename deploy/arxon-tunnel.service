@@ -1,0 +1,17 @@
+[Unit]
+Description=Arxon named Cloudflare tunnel (rpc-test.arxon.io)
+After=network-online.target arxon-node.service arxon-relayer.service
+Wants=network-online.target arxon-node.service arxon-relayer.service
+
+[Service]
+Type=simple
+User=root
+ExecStartPre=/bin/sleep 3
+ExecStart=/bin/sh /root/run-tunnel
+Restart=always
+RestartSec=4
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

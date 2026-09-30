@@ -677,6 +677,22 @@ pub mod pallet {
 			T::Currency::balance(&Self::pool_account())
 		}
 
+		/// Moves `amount` from `from` to `to` when `from` holds at least that much.
+		///
+		/// `0x801` shield is payable: the EVM credits the precompile, then this
+		/// pallet still debits the depositor. Returning the credit avoids a double charge.
+		/// Unit tests that only set `apparent_value` skip this because `from` is empty.
+		pub fn return_call_value(
+			from: T::AccountId,
+			to: T::AccountId,
+			amount: BalanceOf<T>,
+		) -> DispatchResult {
+			if T::Currency::balance(&from) < amount {
+				return Ok(());
+			}
+			T::Currency::transfer(&from, &to, amount, Preservation::Expendable).map(|_| ())
+		}
+
 		/// Registered shielded key of `who`.
 		pub fn shielded_key(who: &T::AccountId) -> Option<FieldBytes> {
 			ShieldedKeys::<T>::get(who)

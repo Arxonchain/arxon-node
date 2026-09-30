@@ -18,13 +18,7 @@ use core::marker::PhantomData;
 use arxon_zk_primitives::{FieldBytes, Proof, MAX_PROOF_BYTES};
 use frame_support::{
 	dispatch::{GetDispatchInfo, PostDispatchInfo},
-	traits::{
-		tokens::{
-			fungible::{Inspect, Mutate},
-			Preservation,
-		},
-		ConstU32,
-	},
+	traits::ConstU32,
 };
 use frame_system::RawOrigin;
 use pallet_evm::AddressMapping;
@@ -108,7 +102,6 @@ where
 	R::RuntimeCall:
 		Dispatchable<PostInfo = PostDispatchInfo> + GetDispatchInfo + From<pallet_privacy::Call<R>>,
 	<R::RuntimeCall as Dispatchable>::RuntimeOrigin: From<RawOrigin<pallet_evm::AccountIdOf<R>>>,
-	R::AccountId: Eq,
 	pallet_privacy::BalanceOf<R>: TryFrom<u128>,
 	frame_system::pallet_prelude::BlockNumberFor<R>: TryFrom<u128>,
 {
@@ -229,22 +222,13 @@ where
 	R: pallet_evm::Config
 		+ pallet_privacy::Config
 		+ frame_system::Config<AccountId = pallet_evm::AccountIdOf<R>>,
-	R::AccountId: Eq,
 	pallet_privacy::BalanceOf<R>: TryFrom<u128>,
 {
 	let value = to_balance::<R>(amount)?;
 	let precompile = R::AddressMapping::into_account_id(handle.context().address);
 	let caller = R::AddressMapping::into_account_id(handle.context().caller);
-	if <R as pallet_privacy::Config>::Currency::balance(&precompile) < value {
-		return Ok(());
-	}
-	<R as pallet_privacy::Config>::Currency::transfer(
-		&precompile,
-		&caller,
-		value,
-		Preservation::Expendable,
-	)
-	.map_err(|_| revert("value refund failed"))?;
+	pallet_privacy::Pallet::<R>::return_call_value(precompile, caller, value)
+		.map_err(|_| revert("value refund failed"))?;
 	Ok(())
 }
 

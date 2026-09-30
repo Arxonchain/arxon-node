@@ -215,11 +215,11 @@ A verification costs 250k to 800k gas (its weight at 40,000 ps per gas). `eth_ca
 
 ### EVM precompile `0x801`
 
-State-changing. Dispatches into the same `pallet_privacy` calls as the native extrinsics, signed as the EVM caller. `msg.value` is rejected; amounts are ABI `uint256` base units. Empty proof `bytes` mean `None` (the balance proof is required). Optional PTR and compliance attachments are `(bool present, uint8 outputIndex, bytes32 id)`.
+State-changing. Dispatches into the same `pallet_privacy` calls as the native extrinsics, signed as the EVM caller. `shield` is payable: the deposit is `msg.value`, not an ABI `uint256`. `unshield` and `submitPrivateTransfer` reject `msg.value`; their amounts stay ABI `uint256` base units. Empty proof `bytes` mean `None` (the balance proof is required). Optional PTR and compliance attachments are `(bool present, uint8 outputIndex, bytes32 id)`.
 
 | Method | Native call |
 |---|---|
-| `shield(uint256 amount, Output[] outputs, uint8 maskBits, uint256 expiryBlock, Proofs proofs)` | `privacy.shield` |
+| `shield(Output[] outputs, uint8 maskBits, uint256 expiryBlock, Proofs proofs) payable` | `privacy.shield` (`amount = msg.value`) |
 | `unshield(address recipient, uint256 amount, bytes32 anchor, Input[] inputs, Output[] outputs, uint8 maskBits, uint256 expiryBlock, Proofs proofs)` | `privacy.unshield` |
 | `submitPrivateTransfer(bytes32 anchor, Input[] inputs, Output[] outputs, uint8 maskBits, uint256 expiryBlock, OptionalPtr ptr, OptionalCompliance compliance, Proofs proofs)` | `privacy.submit_private_transfer` |
 

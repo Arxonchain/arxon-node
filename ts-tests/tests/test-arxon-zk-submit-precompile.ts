@@ -13,7 +13,6 @@ describeWithFrontier("Arxon ZK submit precompile (0x801)", (context) => {
 		name: "shield",
 		type: "function",
 		inputs: [
-			{ type: "uint256", name: "amount" },
 			{
 				type: "tuple[]",
 				name: "outputs",
@@ -43,7 +42,6 @@ describeWithFrontier("Arxon ZK submit precompile (0x801)", (context) => {
 
 	function shieldData() {
 		return context.web3.eth.abi.encodeFunctionCall(shieldAbi as any, [
-			"42000000000",
 			[[ZERO_WORD, ZERO_WORD, ZERO_WORD, ZERO_WORD, "0x11"]],
 			0,
 			100,
@@ -51,8 +49,10 @@ describeWithFrontier("Arxon ZK submit precompile (0x801)", (context) => {
 		] as any);
 	}
 
-	async function call(to: string, data: string) {
-		return customRequest(context.web3, "eth_call", [{ to, data }]);
+	async function call(to: string, data: string, value?: string) {
+		const tx: { to: string; data: string; value?: string } = { to, data };
+		if (value) tx.value = value;
+		return customRequest(context.web3, "eth_call", [tx]);
 	}
 
 	it("is a precompile: unknown selectors revert", async function () {
@@ -61,7 +61,7 @@ describeWithFrontier("Arxon ZK submit precompile (0x801)", (context) => {
 	});
 
 	it("shield with a dummy proof reverts and does not insert a note", async function () {
-		const result = await call(ARXON_ZK_SUBMIT_PRECOMPILE, shieldData());
+		const result = await call(ARXON_ZK_SUBMIT_PRECOMPILE, shieldData(), "0x9c7652400");
 		expect(result.error, JSON.stringify(result.error)).to.not.be.undefined;
 		expect(result.error.message).to.include("revert");
 

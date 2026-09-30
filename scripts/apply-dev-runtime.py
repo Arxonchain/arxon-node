@@ -31,8 +31,8 @@ def main() -> int:
 	before = spec_version(substrate)
 	print("spec before:", before)
 
-	if before == 3:
-		print("already spec 3; nothing to do")
+	if before == 4:
+		print("already spec 4; nothing to do")
 		return 0
 
 	keypair = Keypair.create_from_private_key(ALITH_PRIV, crypto_type=KeypairType.ECDSA)
@@ -64,7 +64,7 @@ def main() -> int:
 	substrate = SubstrateInterface(url=RPC)
 	after = spec_version(substrate)
 	print("spec after:", after)
-	return 0 if after == 3 else 2
+	return 0 if after == 4 else 2
 
 
 if __name__ == "__main__":

@@ -2,10 +2,16 @@
 set -euo pipefail
 SRC=/root/arxon-node/deploy
 UNIT=/etc/systemd/system
+VENV=/root/relayer-venv
 
 test -f "$SRC/relayer.py"
 test -x /root/arxon-node/target/release/arxon-node
-python3 -c "from eth_account import Account"
+
+if [ ! -x "$VENV/bin/python3" ]; then
+	python3 -m venv "$VENV"
+fi
+"$VENV/bin/pip" install -q eth-account
+"$VENV/bin/python3" -c "from eth_account import Account"
 
 cp "$SRC/relayer.py" /root/relayer.py
 cp "$SRC/run-relayer.sh" /root/run-relayer

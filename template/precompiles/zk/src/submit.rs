@@ -8,8 +8,9 @@
 //!
 //! Empty `bytes` on an optional proof means `None`. The balance proof is
 //! required. Optional PTR / compliance attachments are a `(bool,uint8,bytes32)`
-//! tuple; `present = false` skips them. Amounts are transparent ARX base units
-//! (18 decimals), not `msg.value`.
+//! tuple; `present = false` skips them. `shield` is payable: the deposit is
+//! `msg.value` so Hide amount is not a named ABI `uint256`. Unshield and
+//! private transfer still take amounts as ABI `uint256` and reject value.
 
 use alloc::vec::Vec;
 use core::marker::PhantomData;
@@ -17,7 +18,13 @@ use core::marker::PhantomData;
 use arxon_zk_primitives::{FieldBytes, Proof, MAX_PROOF_BYTES};
 use frame_support::{
 	dispatch::{GetDispatchInfo, PostDispatchInfo},
-	traits::ConstU32,
+	traits::{
+		tokens::{
+			fungible::{Inspect, Mutate},
+			Preservation,
+		},
+		ConstU32,
+	},
 };
 use frame_system::RawOrigin;
 use pallet_evm::AddressMapping;
@@ -101,22 +108,26 @@ where
 	R::RuntimeCall:
 		Dispatchable<PostInfo = PostDispatchInfo> + GetDispatchInfo + From<pallet_privacy::Call<R>>,
 	<R::RuntimeCall as Dispatchable>::RuntimeOrigin: From<RawOrigin<pallet_evm::AccountIdOf<R>>>,
+	R::AccountId: Eq,
 	pallet_privacy::BalanceOf<R>: TryFrom<u128>,
 	frame_system::pallet_prelude::BlockNumberFor<R>: TryFrom<u128>,
 {
-	/// Moves `amount` ARX from the caller into the pool as the given notes.
+	/// Moves `msg.value` ARX from the caller into the pool as the given notes.
 	#[precompile::public(
-		"shield(uint256,(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bytes,bytes,bytes,bytes,bytes))"
+		"shield((bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bytes,bytes,bytes,bytes,bytes))"
 	)]
+	#[precompile::payable]
 	fn shield(
 		handle: &mut impl PrecompileHandle,
-		amount: U256,
 		outputs: AbiOutputs,
 		mask_bits: u8,
 		expiry_block: U256,
 		proofs: AbiProofs,
 	) -> EvmResult {
-		ensure_no_value(handle)?;
+		let amount = handle.context().apparent_value;
+		if amount.is_zero() {
+			return Err(revert("amount required"));
+		}
 		RuntimeHelper::<R>::try_dispatch(
 			handle,
 			signed_origin::<R>(handle),
@@ -129,6 +140,9 @@ where
 			},
 			0,
 		)?;
+		// EVM already credited this precompile with `msg.value`. Pallet shield
+		// still debits the depositor, so return that credit or the user pays twice.
+		refund_call_value::<R>(handle, amount)?;
 		Ok(())
 	}
 
@@ -208,6 +222,30 @@ fn ensure_no_value(handle: &impl PrecompileHandle) -> EvmResult {
 	} else {
 		Ok(())
 	}
+}
+
+fn refund_call_value<R>(handle: &impl PrecompileHandle, amount: U256) -> EvmResult
+where
+	R: pallet_evm::Config
+		+ pallet_privacy::Config
+		+ frame_system::Config<AccountId = pallet_evm::AccountIdOf<R>>,
+	R::AccountId: Eq,
+	pallet_privacy::BalanceOf<R>: TryFrom<u128>,
+{
+	let value = to_balance::<R>(amount)?;
+	let precompile = R::AddressMapping::into_account_id(handle.context().address);
+	let caller = R::AddressMapping::into_account_id(handle.context().caller);
+	if <R as pallet_privacy::Config>::Currency::balance(&precompile) < value {
+		return Ok(());
+	}
+	<R as pallet_privacy::Config>::Currency::transfer(
+		&precompile,
+		&caller,
+		value,
+		Preservation::Expendable,
+	)
+	.map_err(|_| revert("value refund failed"))?;
+	Ok(())
 }
 
 fn signed_origin<R>(

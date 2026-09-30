@@ -217,7 +217,7 @@ Original: EVM precompile address `0x800` was reserved with a revert stub, and ru
 * View only. Cap proof size and public input count. Gas model required.
 * Register methods in `template/runtime/src/precompiles.rs`.
 * Proofs bind to chain ID 7171 and `PrivacyMask::as_bits`. Native and EVM must not fork the mask encoding.
-* Delivered: `0x800` with the three listed methods plus `getNoteTreeRoot` and `isKnownNoteRoot`, all view, proof capped at 8192 bytes and public inputs at 2 instances of 16 rows, gas from the verifier weight. `0x801` submits `shield`, `unshield` and `submitPrivateTransfer` into `pallet_privacy` as the EVM caller (empty optional proof bytes mean `None`; `msg.value` is rejected). `ts-tests/tests/test-arxon-zk-precompile.ts` exercises `0x800` against a running node; `ts-tests/tests/test-arxon-zk-submit-precompile.ts` covers `0x801`.
+* Delivered: `0x800` with the three listed methods plus `getNoteTreeRoot` and `isKnownNoteRoot`, all view, proof capped at 8192 bytes and public inputs at 2 instances of 16 rows, gas from the verifier weight. `0x801` submits `shield`, `unshield` and `submitPrivateTransfer` into `pallet_privacy` as the EVM caller (empty optional proof bytes mean `None`; `shield` is payable and takes the deposit from `msg.value`; `unshield` and `submitPrivateTransfer` reject `msg.value`). `ts-tests/tests/test-arxon-zk-precompile.ts` exercises `0x800` against a running node; `ts-tests/tests/test-arxon-zk-submit-precompile.ts` covers `0x801`.
 
 ### Security after the circuits exist
 

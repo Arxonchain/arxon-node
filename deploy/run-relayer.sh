@@ -1,2 +1,2 @@
 #!/bin/sh
-exec python3 /root/relayer.py
+exec /root/relayer-venv/bin/python3 /root/relayer.py

@@ -3,7 +3,11 @@
 use arxon_zk_primitives::{CircuitId, FieldBytes, MAX_INSTANCES, MAX_PROOF_BYTES};
 use frame_support::{
 	assert_ok,
-	traits::{fungible::Inspect, ConstU32},
+	traits::{
+		fungible::Inspect,
+		tokens::{fungible::Mutate, Preservation},
+		ConstU32,
+	},
 };
 use pallet_evm::GasWeightMapping;
 use pallet_note_tree::{MerkleTree, TreeId};
@@ -465,9 +469,8 @@ fn none_attachment() -> AbiOptionalAttachment {
 
 const EXPIRY: u64 = 100;
 
-fn shield_call(amount: u128, outs: AbiOutputs, mask: u8) -> SCall {
+fn shield_call(outs: AbiOutputs, mask: u8) -> SCall {
 	SCall::shield {
-		amount: U256::from(amount),
 		outputs: outs,
 		mask_bits: mask,
 		expiry_block: U256::from(EXPIRY),
@@ -488,8 +491,9 @@ fn submit_shield_moves_funds_into_the_pool_and_inserts_the_commitment() {
 			.prepare_test(
 				Alice,
 				submit_address(),
-				shield_call(42 * UNIT, abi_outputs(vec![abi_output(1, 2)]), 0),
+				shield_call(abi_outputs(vec![abi_output(1, 2)]), 0),
 			)
+			.with_value(42 * UNIT)
 			.execute_returns(());
 
 		let alice: crate::mock::AccountId = Alice.into();
@@ -504,14 +508,58 @@ fn submit_shield_moves_funds_into_the_pool_and_inserts_the_commitment() {
 }
 
 #[test]
+fn submit_shield_reverts_when_msg_value_is_zero() {
+	new_test_ext().execute_with(|| {
+		precompiles()
+			.prepare_test(
+				Alice,
+				submit_address(),
+				shield_call(abi_outputs(vec![abi_output(1, 2)]), 0),
+			)
+			.execute_reverts(|out| revert_contains(out, "amount required"));
+	});
+}
+
+#[test]
+fn submit_shield_refunds_msg_value_so_the_depositor_is_not_charged_twice() {
+	new_test_ext().execute_with(|| {
+		let alice: crate::mock::AccountId = Alice.into();
+		let submit: crate::mock::AccountId = submit_address().into();
+		assert_ok!(<pallet_balances::Pallet<Runtime> as Mutate<_>>::transfer(
+			&alice,
+			&submit,
+			42 * UNIT,
+			Preservation::Expendable,
+		));
+
+		precompiles()
+			.prepare_test(
+				Alice,
+				submit_address(),
+				shield_call(abi_outputs(vec![abi_output(1, 2)]), 0),
+			)
+			.with_value(42 * UNIT)
+			.execute_returns(());
+
+		assert_eq!(
+			pallet_balances::Pallet::<Runtime>::balance(&alice),
+			ALICE_BALANCE - 42 * UNIT
+		);
+		assert_eq!(pallet_balances::Pallet::<Runtime>::balance(&submit), 0);
+		assert_eq!(Privacy::pool_balance(), 42 * UNIT);
+	});
+}
+
+#[test]
 fn submit_shield_reverts_on_an_invalid_mask_and_does_not_write() {
 	new_test_ext().execute_with(|| {
 		precompiles()
 			.prepare_test(
 				Alice,
 				submit_address(),
-				shield_call(42 * UNIT, abi_outputs(vec![abi_output(1, 2)]), 0x10),
+				shield_call(abi_outputs(vec![abi_output(1, 2)]), 0x10),
 			)
+			.with_value(42 * UNIT)
 			.execute_reverts(|out| revert_contains(out, "InvalidMask"));
 
 		assert_eq!(NoteTree::leaf_count(TreeId::Note), 0);
@@ -528,8 +576,9 @@ fn submit_shield_reverts_when_the_verifier_rejects() {
 			.prepare_test(
 				Alice,
 				submit_address(),
-				shield_call(42 * UNIT, abi_outputs(vec![abi_output(1, 2)]), 0),
+				shield_call(abi_outputs(vec![abi_output(1, 2)]), 0),
 			)
+			.with_value(42 * UNIT)
 			.execute_reverts(|out| revert_contains(out, "InvalidProof"));
 
 		assert_eq!(NoteTree::leaf_count(TreeId::Note), 0);
@@ -543,7 +592,7 @@ fn submit_shield_reverts_in_a_static_call() {
 			.prepare_test(
 				Alice,
 				submit_address(),
-				shield_call(42 * UNIT, abi_outputs(vec![abi_output(1, 2)]), 0),
+				shield_call(abi_outputs(vec![abi_output(1, 2)]), 0),
 			)
 			.with_static_call(true)
 			.execute_reverts(|out| !out.is_empty());
@@ -557,8 +606,9 @@ fn submit_unshield_pays_the_recipient_from_the_pool() {
 			.prepare_test(
 				Alice,
 				submit_address(),
-				shield_call(42 * UNIT, abi_outputs(vec![abi_output(1, 2)]), 0),
+				shield_call(abi_outputs(vec![abi_output(1, 2)]), 0),
 			)
+			.with_value(42 * UNIT)
 			.execute_returns(());
 		let anchor = H256(NoteTree::current_root(TreeId::Note).0);
 		let bob: crate::mock::AccountId = Bob.into();
@@ -593,8 +643,9 @@ fn submit_private_transfer_spends_and_creates_notes() {
 			.prepare_test(
 				Alice,
 				submit_address(),
-				shield_call(42 * UNIT, abi_outputs(vec![abi_output(1, 2)]), 0),
+				shield_call(abi_outputs(vec![abi_output(1, 2)]), 0),
 			)
+			.with_value(42 * UNIT)
 			.execute_returns(());
 		let anchor = H256(NoteTree::current_root(TreeId::Note).0);
 
@@ -626,7 +677,7 @@ fn submit_selectors_match_the_documented_signatures() {
 	assert_eq!(
 		SCall::shield_selectors(),
 		&[compute_selector(
-			"shield(uint256,(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bytes,bytes,bytes,bytes,bytes))"
+			"shield((bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bytes,bytes,bytes,bytes,bytes))"
 		)]
 	);
 	assert_eq!(

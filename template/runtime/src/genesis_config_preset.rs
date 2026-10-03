@@ -85,6 +85,17 @@ fn testnet_genesis(
 				storage: Default::default(),
 			},
 		);
+		for address in crate::arxon_precompile_addresses() {
+			map.insert(
+				address,
+				fp_evm::GenesisAccount {
+					nonce: U256::from(1),
+					balance: U256::zero(),
+					storage: Default::default(),
+					code: crate::PRECOMPILE_PLACEHOLDER_CODE.to_vec(),
+				},
+			);
+		}
 		map.insert(
 			// H160 address for benchmark usage
 			H160::from(hex!("1000000000000000000000000000000000000001")),

@@ -70,7 +70,10 @@ pub use pallet_balances::Call as BalancesCall;
 pub use pallet_timestamp::Call as TimestampCall;
 
 use precompiles::FrontierPrecompiles;
-pub use precompiles::{ARXON_ARX20_PRECOMPILE, ARXON_ZK_PRECOMPILE, ARXON_ZK_SUBMIT_PRECOMPILE};
+pub use precompiles::{
+	arxon_precompile_addresses, ARXON_ARX20_PRECOMPILE, ARXON_ZK_PRECOMPILE,
+	ARXON_ZK_SUBMIT_PRECOMPILE, PRECOMPILE_PLACEHOLDER_CODE,
+};
 
 /// Type of block number.
 pub type BlockNumber = u32;
@@ -145,13 +148,39 @@ pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
 /// Executive: handles dispatch to the various modules.
 /// Versioned storage migrations; each runs once and is a no-op on a chain that
 /// already has the target version. Spec 2 brought the zero-knowledge pallets to
-/// chains that ran spec 1; spec 5 indexes note tree leaves by position.
+/// chains that ran spec 1; spec 5 indexes note tree leaves by position; spec 7
+/// gives the Arxon precompiles their placeholder code (idempotent).
 pub type Migrations = (
 	pallet_zk_verifier::migrations::V0ToV1<Runtime>,
 	pallet_note_tree::migrations::V0ToV1<Runtime>,
 	pallet_ptr::migrations::V0ToV1<Runtime>,
 	pallet_note_tree::migrations::V1ToV2<Runtime>,
+	PrecompilePlaceholderCode,
 );
+
+/// Stores [`PRECOMPILE_PLACEHOLDER_CODE`] at every Arxon precompile address
+/// that has no code, as genesis does on new chains. Leaves any address that
+/// has code alone, so it is a few reads on every later upgrade.
+pub struct PrecompilePlaceholderCode;
+
+impl frame_support::traits::OnRuntimeUpgrade for PrecompilePlaceholderCode {
+	fn on_runtime_upgrade() -> Weight {
+		let mut writes = 0u64;
+		for address in arxon_precompile_addresses() {
+			if !pallet_evm::AccountCodes::<Runtime>::contains_key(address) {
+				// Only fails for a caller-filtered creation; there is no caller here.
+				let _ = pallet_evm::Pallet::<Runtime>::create_account(
+					address,
+					PRECOMPILE_PLACEHOLDER_CODE.to_vec(),
+					None,
+				);
+				// Code, code metadata and the account's providers.
+				writes = writes.saturating_add(3);
+			}
+		}
+		<Runtime as frame_system::Config>::DbWeight::get().reads_writes(3 + writes, writes)
+	}
+}
 
 pub type Executive = frame_executive::Executive<
 	Runtime,
@@ -1220,6 +1249,67 @@ mod tests {
 			history >= inserts_per_block * window,
 			"history {history} < {inserts_per_block} inserts per block x {window} blocks"
 		);
+	}
+
+	mod precompile_placeholder_code {
+		use frame_support::traits::OnRuntimeUpgrade;
+
+		use super::super::{
+			arxon_precompile_addresses, PrecompilePlaceholderCode, Runtime,
+			PRECOMPILE_PLACEHOLDER_CODE,
+		};
+
+		fn codes() -> Vec<Vec<u8>> {
+			arxon_precompile_addresses()
+				.into_iter()
+				.map(pallet_evm::AccountCodes::<Runtime>::get)
+				.collect()
+		}
+
+		#[test]
+		fn the_upgrade_gives_every_arxon_precompile_its_placeholder_code() {
+			sp_io::TestExternalities::default().execute_with(|| {
+				PrecompilePlaceholderCode::on_runtime_upgrade();
+
+				assert_eq!(codes(), vec![PRECOMPILE_PLACEHOLDER_CODE.to_vec(); 3]);
+				for address in arxon_precompile_addresses() {
+					assert_eq!(
+						pallet_evm::Pallet::<Runtime>::account_code_metadata(address).size,
+						5,
+						"extcodesize is not zero"
+					);
+				}
+			});
+		}
+
+		#[test]
+		fn the_upgrade_writes_nothing_once_the_code_is_there() {
+			sp_io::TestExternalities::default().execute_with(|| {
+				PrecompilePlaceholderCode::on_runtime_upgrade();
+
+				let weight = PrecompilePlaceholderCode::on_runtime_upgrade();
+
+				assert_eq!(
+					weight,
+					<Runtime as frame_system::Config>::DbWeight::get().reads(3)
+				);
+			});
+		}
+
+		#[test]
+		fn the_dev_genesis_already_has_the_placeholder_code() {
+			let genesis: crate::RuntimeGenesisConfig =
+				serde_json::from_value(crate::genesis_config_preset::development())
+					.expect("dev preset is a full genesis config");
+			let mut ext: sp_io::TestExternalities =
+				sp_runtime::BuildStorage::build_storage(&genesis)
+					.unwrap()
+					.into();
+
+			ext.execute_with(|| {
+				assert_eq!(codes(), vec![PRECOMPILE_PLACEHOLDER_CODE.to_vec(); 3]);
+			});
+		}
 	}
 
 	mod arx20_contracts {

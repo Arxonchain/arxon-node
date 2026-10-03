@@ -188,6 +188,19 @@ fn testnet_genesis(
 				code: vec![0x00],
 			},
 		);
+		// Code at the Arxon precompiles, so Solidity calls to them pass the
+		// `extcodesize` check (see `arxon_runtime::PRECOMPILE_PLACEHOLDER_CODE`).
+		for address in arxon_runtime::arxon_precompile_addresses() {
+			map.insert(
+				address,
+				fp_evm::GenesisAccount {
+					nonce: U256::from(1),
+					balance: U256::zero(),
+					storage: Default::default(),
+					code: arxon_runtime::PRECOMPILE_PLACEHOLDER_CODE.to_vec(),
+				},
+			);
+		}
 		map
 	};
 

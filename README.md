@@ -140,16 +140,19 @@ Code map:
 | `crates/zk-primitives` | `arxon-zk-primitives` | `no_std` contract shared by circuits and runtime: circuit ids, field encoding, public input layouts, bundle digest, tagged Poseidon, frozen VK hashes. |
 | `crates/zk` | `arxon-zk` | The six Halo2 circuits, prover, verifier, key cache, pins, reference Merkle trees and a wallet module that builds witnesses. `std` only. |
 | `template/primitives/zk-host` | `arxon-zk-host` | Host function `verify_halo2_ipa(circuit_id, vk_hash, proof, public_inputs)`. Verification never runs inside Wasm. |
-| `template/primitives/zk-runtime-api` | `arxon-zk-runtime-api` | `ArxonZkApi`: note and membership roots, anchor and nullifier lookups, circuit status. |
+| `template/primitives/zk-runtime-api` | `arxon-zk-runtime-api` | `ArxonZkApi` (version 3): note and membership roots, anchor and nullifier lookups, circuit status, leaf pages, `balance_hidden(account)`, `arx20_shielded_unit(token)`. |
 | `template/pallets/{zk-verifier,nullifier-registry,note-tree,privacy,ptr}` | pallets 18, 19, 20, 13, 15 | Runtime enforcement. |
-| `template/precompiles/zk` | `pallet-evm-precompile-arxon-zk` | Precompiles `0x800` (view) and `0x801` (submit). |
+| `template/precompiles/zk` | `pallet-evm-precompile-arxon-zk` | Precompiles `0x800` (view), `0x801` (native ARX submit) and `0x802` (ARX-20 pools). |
+| `crates/zk-prover`, `crates/zk-prove-wasm` | `arxon-prove` | Wallet prover: local HTTP server and browser WASM build of the same library. |
+| `contracts/iarx20` | | `IARX20` and the reference `ARX20` token. |
+| `deploy/relayer.py` | | Fee relayer for `0x801` and listed ARX-20 tokens. |
 
 ### Shielded pool
 
 * Funds shielded with `shield` move from the depositor to the pool account `0x6d6f646c6172782f73686c640000000000000000` (`PalletId(*b"arx/shld")`). `unshield` pays out of that account. The pool never mints.
-* Shielded amounts are `u64` multiples of the shielded unit, `10^9` base units (1 gwei of ARX). Transparent amounts must be exact multiples.
+* Shielded amounts are `u64` multiples of the shielded unit: `10^9` base units (1 gwei of ARX) for native ARX, and for an ARX-20 token the unit it fixed from its decimals (see [ARX-20](#evm-precompile-0x802-arx-20)). Transparent amounts and fees must be exact multiples.
 * Every proof binds `chain_id = 7171` (a fixed constant inside every verifying key) and an `expiry_block` accepted only in `[now, now + 128]`.
-* Every proof also binds the bundle digest `blake2_256("arxon/bundle/v2" ++ SCALE(chain_id, expiry_block, recipient, transparent_in, transparent_out, fee, nullifiers, commitments, cv_inputs, cv_outputs, mask_bits, blake2_256(encrypted_notes), receipt, compliance))[..31] ++ 0x00`, recomputed by the pallet from the extrinsic. `receipt` is `Option<(payment_output_index, ptr_id)>` and `compliance` is `Option<(output_index, registry_root)>`. A proof cannot be lifted onto a different transfer, recipient or mask, and a relayer cannot strip an attached receipt or compliance attestation. The signer is not in the digest, so any relayer may submit a bundle.
+* Every proof also binds the bundle digest `blake2_256("arxon/bundle/v2" ++ SCALE(chain_id, expiry_block, recipient, transparent_in, transparent_out, fee, nullifiers, commitments, cv_inputs, cv_outputs, mask_bits, blake2_256(encrypted_notes), receipt, compliance))[..31] ++ 0x00`, recomputed by the pallet from the extrinsic. `receipt` is `Option<(payment_output_index, ptr_id)>` and `compliance` is `Option<(output_index, registry_root)>`. A relayed bundle (`fee > 0`) appends `SCALE(Option<fee_recipient>)`; fee-free bundles keep the digest above unchanged. ARX-20 bundles hash `"arxon/arx20-bundle/v1" ++ token ++` the native preimage. A proof cannot be lifted onto a different transfer, recipient, fee, fee recipient or mask, and a relayer cannot strip an attached receipt or compliance attestation. The signer is not in the digest, so any relayer may submit a bundle.
 * Anchors (note tree roots) stay valid for the last 65536 inserts. A test derives that bound from the measured weights: blocks full of the cheapest inserts cannot evict an anchor within the 128 block proof validity window.
 * A bundle carries at most 2 inputs and 2 outputs. Missing slots are the public dummy commitment `H_CV(0, 0)`.
 * Nullifiers are rejected if spent or repeated inside a bundle; commitments are rejected if already in the tree.
@@ -163,8 +166,30 @@ Calls of `pallet-privacy`:
 | `shield` | `amount, outputs, mask_bits, expiry_block, proofs` | C1 (one instance per output), C2 |
 | `unshield` | `recipient, amount, anchor, inputs, outputs, mask_bits, expiry_block, proofs` | C3 (one instance per input), C1 for change, C2 |
 | `submit_private_transfer` | `anchor, inputs, outputs, mask_bits, expiry_block, ptr, compliance, proofs` | C3, C1, C2, plus C4 when `ptr` is attached and C6 when `compliance` is attached |
+| `unshield_with_fee`, `submit_private_transfer_with_fee` | as above, plus `fee: RelayFee { amount, recipient }` before `proofs` | as above; C2's `fee` row is `amount` in shielded units |
+| `set_balance_visibility` | `hidden` | none. The hide balance flag of the signer (see [Hide balance](#hide-balance)). |
+| `shield_arx20`, `unshield_arx20`, `submit_private_transfer_arx20` and their `_with_fee` variants | `token` first, then as the native calls | as the native calls. Signed by the token contract through `0x802`. |
+| `set_arx20_unit` | `token, decimals` | none. Signed by the token; once, while its pool is empty. |
 
 `ptr` is `PtrAttachment { payment_output_index, ptr_id }`. `compliance` is `ComplianceAttachment { output_index, registry_root }`, where `registry_root` may be any recent membership root, so an `add_member` does not invalidate proofs in flight.
+
+Every event of the pool (`Shielded`, `Unshielded`, `BundleExecuted`, `NoteSpent`, `NoteCreated`, `ComplianceAttested`, `FeePaid`) names its `asset`: `Native` or `Arx20(token)`. `pallet-ptr` keeps the asset of each receipt beside it (`ReceiptAsset`) and reports it in `ReceiptCreated` and `Disclosed` (`None` for a receipt recorded before spec 7).
+
+### Hide balance
+
+Hide balance is an account flag, `set_balance_visibility(true)` (or `0x801.setBalanceVisibility(true)`). For an account that has it on, money stays in the pool: it pays privately, keeps its change as notes and pays its relayer from the pool, and no pool value lands in its public account. With it off, an unshield to any public `0x` is allowed and public. The same rules hold for every ARX-20 pool. What the chain enforces:
+
+* A bundle with mask bit 3 (hide balance) never unshields. It can still pay privately and pay a relayer fee.
+* No pool value lands in an account that has the flag on: no unshield pays it (its own `0x` or anyone else's) and no relayer fee is paid to it.
+* An account with the flag on cannot sign an unshield: neither the extrinsic signer, nor the caller or the transaction signer (`tx.origin`) of an unshield through `0x801` or `0x802`.
+
+The limit, stated plainly: the spender of a bundle is hidden, so the chain cannot refuse an unshield because of the spender's flag when someone else submits it. A wallet whose user turned the flag on should set mask bit 3 on every bundle it builds and not offer unshield (the wallet prover refuses to build an unshield with bit 3; wallets do not apply this policy yet), but someone holding the spending key could still unshield through a relayer, or pay a relayer fee to another account they control, from a different wallet. Revealed sender keys are not checked against flags either: key registration is first come, first served, so anyone could register a victim's key to a flagged account and block the victim's unshields. Binding the flag to the spending key itself needs a circuit change (a per-key flag committed in the note or proven in Circuit 3). The flag also does not stop ordinary public transfers to the account.
+
+A change of the flag takes effect `MaxProofValidity + 1` (129) blocks after the call; until then the value in force before it still applies, and asking for that value again cancels the change. `balance_hidden` and `isBalanceHidden` report the value in force. Without the delay, a recipient could turn the flag on after a relayer dry-ran its unshield and make the relayer pay for a failed transaction. An account flagged before spec 7 has its flag in force at once.
+
+### Relayer fees
+
+A relayed bundle pays its relayer from the pool, not from a public account: the `_with_fee` calls take `RelayFee { amount, recipient }`, the fee is Circuit 2's `fee` row (`inputs = outputs + transparent_out + fee`), and `fee` and `recipient` are both bound into the bundle digest, so the relayer that submits cannot raise or redirect it. For native ARX the pallet transfers the fee from the pool account to `recipient` after the payment (the pool must hold `amount + fee`); for an ARX-20 the pallet emits `FeePaid` and the token mints the fee to `recipient`. The fee is a positive multiple of the pool's shielded unit. `deploy/relayer.py` only submits bundles that pay it at least `RELAYER_MIN_FEE_WEI` and, for native ARX, at least the gas they cost it (fee-free ones only while `RELAYER_ACCEPT_FREE` is on), and only relays ARX-20 tokens listed in `RELAYER_TOKENS`; `GET /relay` returns its address, minimum fees and accepted methods.
 
 ### Disclosures
 
@@ -222,8 +247,29 @@ State-changing. Dispatches into the same `pallet_privacy` calls as the native ex
 | `shield(Output[] outputs, uint8 maskBits, uint256 expiryBlock, Proofs proofs) payable` | `privacy.shield` (`amount = msg.value`) |
 | `unshield(address recipient, uint256 amount, bytes32 anchor, Input[] inputs, Output[] outputs, uint8 maskBits, uint256 expiryBlock, Proofs proofs)` | `privacy.unshield` |
 | `submitPrivateTransfer(bytes32 anchor, Input[] inputs, Output[] outputs, uint8 maskBits, uint256 expiryBlock, OptionalPtr ptr, OptionalCompliance compliance, Proofs proofs)` | `privacy.submit_private_transfer` |
+| `unshieldWithFee(address recipient, uint256 amount, bytes32 anchor, Input[] inputs, Output[] outputs, uint8 maskBits, uint256 expiryBlock, RelayFee fee, Proofs proofs)` | `privacy.unshield_with_fee` |
+| `submitPrivateTransferWithFee(bytes32 anchor, Input[] inputs, Output[] outputs, uint8 maskBits, uint256 expiryBlock, OptionalPtr ptr, OptionalCompliance compliance, RelayFee fee, Proofs proofs)` | `privacy.submit_private_transfer_with_fee` |
+| `setBalanceVisibility(bool hidden)` | `privacy.set_balance_visibility`. Only an account signing its own transaction (`msg.sender == tx.origin`): a contract flagging itself would only make payouts to it fail. |
+| `isBalanceHidden(address account) view returns (bool)` | the flag in force now |
 
-ABI tuples (Solidity structs encode the same way): `Output` is `(bytes32 cm, bytes32 cv, bytes32 revealedReceiver, bytes32 revealedAmount, bytes encryptedNote)`, `Input` is `(bytes32 nullifier, bytes32 cv, bytes32 revealedSender)`, `Proofs` is `(bytes spend, bytes output, bytes balance, bytes receipt, bytes compliance)`.
+ABI tuples (Solidity structs encode the same way): `Output` is `(bytes32 cm, bytes32 cv, bytes32 revealedReceiver, bytes32 revealedAmount, bytes encryptedNote)`, `Input` is `(bytes32 nullifier, bytes32 cv, bytes32 revealedSender)`, `Proofs` is `(bytes spend, bytes output, bytes balance, bytes receipt, bytes compliance)`, `RelayFee` is `(address recipient, uint256 amount)` with `amount` in wei.
+
+### EVM precompile `0x802` (ARX-20)
+
+Isolated shielded pools for issued tokens: each token has its own note tree (`TreeId::Arx20(token)`) and nullifier set, and its bundles use their own digest domain, so a proof for one token or for native ARX never verifies for another. State-changing methods take the token from `msg.sender`, so only the token contract opens its pool; it burns before `shield` and mints after `unshield` (see `contracts/iarx20/ARX20.sol`). The precompile never moves native ARX and rejects `msg.value`.
+
+Only a deployed contract runs a pool: an account without code (an EOA, or a contract still in its constructor) and an EIP-7702 delegated account (code `0xef0100 ++ address`) are refused with `NotATokenContract`.
+
+| Method | Native call |
+|---|---|
+| `shield(uint256 amount, Output[] outputs, uint8 maskBits, uint256 expiryBlock, Proofs proofs)` | `privacy.shield_arx20` |
+| `unshield(...)`, `unshieldWithFee(...)` | `privacy.unshield_arx20`, `privacy.unshield_arx20_with_fee` (same arguments as `0x801`) |
+| `submitPrivateTransfer(...)`, `submitPrivateTransferWithFee(...)` | `privacy.submit_private_transfer_arx20`, `..._with_fee` |
+| `setShieldedDecimals(uint8 decimals)` | `privacy.set_arx20_unit`: fixes the caller's shielded unit, `10^(decimals - 9)` base units (1 at 9 decimals or fewer). Once, while the pool is empty, so the reference token calls it from its constructor; this call alone does not require code. |
+| `shieldedUnit(address token) view returns (uint256)` | base units per shielded unit (10^9 until the token fixes its own) |
+| `getNoteTreeRoot(address)`, `isKnownNoteRoot(address,bytes32)`, `isNullifierSpent(address,bytes32)`, `getNoteLeafCount(address)`, `getNoteLeaf(address,uint256)`, `getNoteLeaves(address,uint256,uint256)` | views of the token's tree and nullifiers |
+
+The reference `ARX20(name, symbol, decimals, initialSupply)` fixes its unit in the constructor, so a 6-decimal token shields amounts down to one base unit. Its `unshieldWithFee` and `transferPrivateWithFee` mint the relayer fee to `fee.recipient`.
 
 ### Deviations from the engineer briefing (for product sign-off)
 
@@ -232,13 +278,15 @@ ABI tuples (Solidity structs encode the same way): `Output` is `(bytes32 cm, byt
 * **Note tree.** It is an append only incremental Merkle tree, not a sparse Merkle tree. Duplicate leaves are rejected, and recent roots are kept as anchors.
 * **Verifier interface.** `pallet-zk-verifier` exposes no `verify(circuit_id, proof, public_inputs)` extrinsic. It is the `VerifyProof` service that the pallets call, and it is reachable publicly through `0x800`.
 * **EVM submission** (shield, unshield and private transfers from Solidity) is `0x801`, which dispatches into the same `pallet_privacy` path as the native extrinsics. `0x800` stays view only.
-* **Fees.** The extrinsic signer pays the fee and is visible. The bundle digest excludes the signer so relayers can submit on behalf of a user. The in circuit `fee` row exists and is fixed at 0 in v1.
-* **`hide_balance`** (bit 3) has no in circuit meaning. It is recorded with the bundle mask. `HideBalanceAccounts` is a separate opt in flag set by `set_balance_visibility`, and transparent balances stay public.
+* **Fees.** The extrinsic signer pays the transaction fee and is visible, so a user who wants to stay unlinked submits through a relayer. The relayer is paid from the pool through Circuit 2's `fee` row (see [Relayer fees](#relayer-fees)).
+* **`hide_balance`** (bit 3) has no in circuit meaning; the pallet enforces it together with the account flag (see [Hide balance](#hide-balance), including what it cannot enforce when the sender is hidden).
 * **Disclosure codes** are replaced by audience bound proofs (see [Disclosures](#disclosures)).
 
 ### Upgrading a running chain
 
 The testnet runs spec 1. Spec 2 carries versioned migrations that register the six circuits with their frozen hashes, build the empty subtree chains of both trees, and delete the old plaintext receipts and disclosure codes. They do nothing on a chain created with spec 2.
+
+Spec 7 (hide balance, relayer fees, ARX-20 contract pools and units) carries one idempotent upgrade step: it stores a 5-byte placeholder code (`PUSH1 0 PUSH1 0 REVERT`, never executed) at `0x800`, `0x801` and `0x802`, as genesis now does. Solidity refuses to call a method without return values at an address without code, so before it no contract could call `0x801.setBalanceVisibility` or make `0x802.shield` / `unshield` calls, the reference ARX-20 included. Its new storage (`HideBalancePending`, `Arx20Unit`, `ReceiptAsset`) starts empty, an account flagged before it keeps its flag in force at once, and an ARX-20 that never fixes its unit keeps 10^9. It adds calls 10 to 14 of `pallet-privacy` without changing the existing ones (`transaction_version` stays 2), but it adds an `asset` field to the pool and receipt events: indexers that decode events by position must update. `ArxonZkApi` moves to version 3. The reference `ARX20` constructor gains a `decimals` argument.
 
 Roll the new `arxon-node` binary out to every validator and full node **before** `set_code`. The runtime imports the `verify_halo2_ipa` host function, and an old binary stalls at the first block that verifies a proof.
 
@@ -248,10 +296,11 @@ Roll the new `arxon-node` binary out to every validator and full node **before**
 |---|---|
 | `make test` | Every unit test, including MockProver tests of every constraint, pallet tests with a fake verifier, and the runtime end to end tests with real proofs. |
 | `make test-zk` | Circuit, host function and primitives tests in release. |
-| `make test-zk-e2e` | Runtime end to end: shield, relayed private transfer, unshield, receipt and disclosure, membership attestation, tampered proof and retargeted recipient rejected. |
+| `make test-zk-e2e` | Runtime end to end: shield, relayed private transfer, unshield, receipt and disclosure, membership attestation, tampered proof and retargeted recipient rejected, relayer paid from the pool (also from what the wallet prover builds), redirected or raised fee rejected, hide balance unshields refused, a 6-decimal ARX-20 shielding in its own unit. |
 | `make measure-zk` | Proof sizes, timings and VK hashes; fails if a proof length or a verifying key hash drifts from its pin. |
 | `make check-wasm` | The `no_std` crates the runtime embeds against `wasm32v1-none`. |
-| `make integration-test` | ts-tests, including `test-arxon-zk-precompile.ts` and `test-arxon-zk-submit-precompile.ts` against a running node. |
+| `make integration-test` | ts-tests, including `test-arxon-zk-precompile.ts`, `test-arxon-zk-submit-precompile.ts` and `test-arxon-arx20.ts` (deploys the reference ARX-20) against a running node. |
+| `cd deploy && python3 -m unittest test_relayer.py` | The relayer's request checks (needs `eth-account` and `eth-abi`). |
 
 Changing a circuit changes its verifying key hash and proof lengths. To re-pin deliberately:
 
@@ -274,7 +323,7 @@ Nodes verify proofs single threaded: halo2's `multicore` feature is off in the n
 | Circuit 4, 5, 6 verification | 11.2 ms, 10.4 ms, 15.8 ms |
 | Note tree insert (depth 32, Poseidon in Wasm) | 3.6 ms |
 | Membership tree insert (depth 16) | 1.8 ms |
-| Nullifier mark, receipt record | about 12 µs |
+| Nullifier mark, receipt record | about 12 µs, about 20 µs |
 
 A 2 in / 2 out private transfer therefore costs about 61 ms of ref time, so a block of 3000 ms of normal dispatch weight holds about 49 of them. Regenerate with `make benchmark-zk` after building `arxon-node` with `--features runtime-benchmarks`.
 

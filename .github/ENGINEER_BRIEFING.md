@@ -133,8 +133,8 @@ Deviations, for product sign-off:
 
 * Value commitments are Poseidon `cv = H_CV(amount, blinding)` instead of Pedersen. Conservation is proven inside Circuit 2 by opening the four commitments; no ECC chip, smaller circuits.
 * `0x800` stays view only as listed below. EVM submission is `0x801`, dispatching into the same `pallet_privacy` calls as the native extrinsics.
-* The extrinsic signer is visible and pays the fee in v1; the bundle digest excludes the signer so relayers work. The `fee` public row is fixed at 0.
-* `hide_balance` (bit 3) has no in circuit effect. It is recorded with the bundle mask; `HideBalanceAccounts` is a separate opt in flag set by `set_balance_visibility`, and transparent balances stay public.
+* The extrinsic signer is visible and pays the transaction fee; the bundle digest excludes the signer so relayers work. Relayers are paid from the pool through Circuit 2's `fee` row (`*_with_fee` calls and `0x801`/`0x802` `WithFee` methods), with the fee and its recipient bound into the digest.
+* `hide_balance` (bit 3) has no in circuit effect. The pallet enforces it with the account flag (`set_balance_visibility`, effective 129 blocks later): a bundle with bit 3 never unshields, no unshield or relayer fee lands in a flagged account, and a flagged account never signs an unshield. The spender is hidden, so an unshield submitted by someone else on a flagged user's behalf is wallet policy until a circuit binds the flag to the key (README, Hide balance).
 * Circuit 1 carries no nullifier (Circuit 3 does) and the block window is a single `expiry_block` accepted in `[now, now + 128]`.
 * The note tree is an append only incremental Merkle tree, not a sparse Merkle tree.
 * `pallet-zk-verifier` has no `verify` extrinsic: it is the `VerifyProof` service the pallets call, reachable publicly through `0x800`.
@@ -217,7 +217,7 @@ Original: EVM precompile address `0x800` was reserved with a revert stub, and ru
 * View only. Cap proof size and public input count. Gas model required.
 * Register methods in `template/runtime/src/precompiles.rs`.
 * Proofs bind to chain ID 7171 and `PrivacyMask::as_bits`. Native and EVM must not fork the mask encoding.
-* Delivered: `0x800` with the three listed methods plus `getNoteTreeRoot` and `isKnownNoteRoot`, all view, proof capped at 8192 bytes and public inputs at 2 instances of 16 rows, gas from the verifier weight. `0x801` submits `shield`, `unshield` and `submitPrivateTransfer` into `pallet_privacy` as the EVM caller (empty optional proof bytes mean `None`; `shield` is payable and takes the deposit from `msg.value`; `unshield` and `submitPrivateTransfer` reject `msg.value`). `ts-tests/tests/test-arxon-zk-precompile.ts` exercises `0x800` against a running node; `ts-tests/tests/test-arxon-zk-submit-precompile.ts` covers `0x801`.
+* Delivered: `0x800` with the three listed methods plus `getNoteTreeRoot` and `isKnownNoteRoot`, all view, proof capped at 8192 bytes and public inputs at 2 instances of 16 rows, gas from the verifier weight. `0x801` submits `shield`, `unshield` and `submitPrivateTransfer` into `pallet_privacy` as the EVM caller (empty optional proof bytes mean `None`; `shield` is payable and takes the deposit from `msg.value`; `unshield` and `submitPrivateTransfer` reject `msg.value`). `ts-tests/tests/test-arxon-zk-precompile.ts` exercises `0x800` against a running node; `ts-tests/tests/test-arxon-zk-submit-precompile.ts` covers `0x801`. `0x802` runs isolated ARX-20 pools, only for deployed contracts (no EOA, no EIP-7702 delegation), each with a shielded unit fixed from its decimals; `ts-tests/tests/test-arxon-arx20.ts` deploys the reference token against it.
 
 ### Security after the circuits exist
 

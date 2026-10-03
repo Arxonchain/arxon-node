@@ -20,6 +20,22 @@ pub const ARXON_ZK_SUBMIT_PRECOMPILE: u64 = pallet_evm_precompile_arxon_zk::SUBM
 /// Arxon ARX-20 pool: per-token trees, never native ARX.
 pub const ARXON_ARX20_PRECOMPILE: u64 = pallet_evm_precompile_arxon_zk::ARX20_ADDRESS;
 
+/// Code stored at the Arxon precompile addresses: `PUSH1 0 PUSH1 0 REVERT`.
+/// The EVM runs the precompile, never this code. It is there so `extcodesize`
+/// is not zero: Solidity checks it before calling a method that returns
+/// nothing, and would revert every such call (`0x801.setBalanceVisibility`,
+/// `0x802.shield` from a token) at an address without code.
+pub const PRECOMPILE_PLACEHOLDER_CODE: [u8; 5] = [0x60, 0x00, 0x60, 0x00, 0xfd];
+
+/// Addresses of the Arxon precompiles, which carry [`PRECOMPILE_PLACEHOLDER_CODE`].
+pub fn arxon_precompile_addresses() -> [H160; 3] {
+	[
+		hash(ARXON_ZK_PRECOMPILE),
+		hash(ARXON_ZK_SUBMIT_PRECOMPILE),
+		hash(ARXON_ARX20_PRECOMPILE),
+	]
+}
+
 pub struct FrontierPrecompiles<R>(PhantomData<R>);
 
 impl<R> FrontierPrecompiles<R>

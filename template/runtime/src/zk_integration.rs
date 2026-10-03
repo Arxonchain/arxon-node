@@ -249,6 +249,10 @@ fn shield_transfer_and_unshield_with_real_proofs() {
 			"on-chain incremental tree matches the reference tree"
 		);
 		assert_eq!(NoteTree::leaf_count(TreeId::Note), 1);
+		assert_eq!(
+			NoteTree::leaves(TreeId::Note, 0, 10),
+			vec![NoteTree::leaf_at(TreeId::Note, 0).expect("indexed")]
+		);
 
 		// 2. Alice privately pays Bob 40 with 2 of change, hiding sender, receiver and amount.
 		let spend = SpendNote::new(alice, shielded.note, reference.path(0), &mut rng);
@@ -422,7 +426,7 @@ fn unshield_retargeted_to_another_recipient_is_rejected() {
 
 #[test]
 fn runtime_api_reports_the_shielded_pool_state() {
-	use arxon_zk_runtime_api::runtime_decl_for_arxon_zk_api::ArxonZkApiV1;
+	use arxon_zk_runtime_api::runtime_decl_for_arxon_zk_api::ArxonZkApiV2;
 
 	dev_ext().execute_with(|| {
 		assert_eq!(Runtime::note_tree_root(), NoteTree::root(TreeId::Note).0);
@@ -433,6 +437,8 @@ fn runtime_api_reports_the_shielded_pool_state() {
 		assert_eq!(Runtime::leaf_count(0), Some(0));
 		assert_eq!(Runtime::leaf_count(1), Some(0));
 		assert_eq!(Runtime::leaf_count(2), None);
+		assert_eq!(Runtime::leaves(0, 0, 10), Some(vec![]));
+		assert_eq!(Runtime::leaves(2, 0, 10), None);
 		assert!(!Runtime::is_nullifier_spent([7u8; 32]));
 		assert!(Runtime::circuit_enabled(1));
 		assert!(Runtime::circuit_enabled(3));

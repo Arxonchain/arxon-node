@@ -1,6 +1,6 @@
 import { expect } from "chai";
 
-import { ARXON_ZK_PRECOMPILE, ARXON_ZK_SUBMIT_PRECOMPILE, NOTE_TREE_EMPTY_ROOT } from "./config";
+import { ARXON_ZK_PRECOMPILE, ARXON_ZK_SUBMIT_PRECOMPILE, GENESIS_ACCOUNT, NOTE_TREE_EMPTY_ROOT } from "./config";
 import { customRequest, describeWithFrontier } from "./util";
 
 // Arxon ZK submit precompile at 0x801: state-changing door into pallet-privacy.
@@ -41,16 +41,21 @@ describeWithFrontier("Arxon ZK submit precompile (0x801)", (context) => {
 	};
 
 	function shieldData() {
-		return context.web3.eth.abi.encodeFunctionCall(shieldAbi as any, [
-			[[ZERO_WORD, ZERO_WORD, ZERO_WORD, ZERO_WORD, "0x11"]],
-			0,
-			100,
-			["0x", DUMMY_PROOF, DUMMY_PROOF, "0x", "0x"],
-		] as any);
+		return context.web3.eth.abi.encodeFunctionCall(
+			shieldAbi as any,
+			[
+				[[ZERO_WORD, ZERO_WORD, ZERO_WORD, ZERO_WORD, "0x11"]],
+				0,
+				100,
+				["0x", DUMMY_PROOF, DUMMY_PROOF, "0x", "0x"],
+			] as any
+		);
 	}
 
 	async function call(to: string, data: string, value?: string) {
-		const tx: { to: string; data: string; value?: string } = { to, data };
+		// A funded caller: shield is payable, and an unfunded call fails in the EVM
+		// (OutOfFund) before it ever reaches the precompile.
+		const tx: { from: string; to: string; data: string; value?: string } = { from: GENESIS_ACCOUNT, to, data };
 		if (value) tx.value = value;
 		return customRequest(context.web3, "eth_call", [tx]);
 	}
@@ -67,10 +72,7 @@ describeWithFrontier("Arxon ZK submit precompile (0x801)", (context) => {
 
 		const root = await call(
 			ARXON_ZK_PRECOMPILE,
-			context.web3.eth.abi.encodeFunctionCall(
-				{ name: "getNoteTreeRoot", type: "function", inputs: [] },
-				[]
-			)
+			context.web3.eth.abi.encodeFunctionCall({ name: "getNoteTreeRoot", type: "function", inputs: [] }, [])
 		);
 		expect(root.result).to.equal(NOTE_TREE_EMPTY_ROOT);
 	});

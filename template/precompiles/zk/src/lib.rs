@@ -35,7 +35,7 @@ use arxon_zk_primitives::{
 };
 use frame_support::traits::ConstU32;
 use pallet_evm::GasWeightMapping;
-use pallet_note_tree::{MerkleTree, TreeId};
+use pallet_note_tree::{MerkleTree, TreeId, MAX_LEAF_PAGE};
 use pallet_zk_verifier::{CircuitConfig, VerifyProof};
 use precompile_utils::prelude::*;
 use scale_codec::MaxEncodedLen;
@@ -59,6 +59,9 @@ pub type AbiInstance = BoundedVec<H256, ConstU32<MAX_PUBLIC_INPUTS>>;
 pub type AbiPublicInputs = BoundedVec<AbiInstance, ConstU32<MAX_INSTANCES>>;
 /// A proof, capped at the contract's hard bound.
 pub type AbiProof = BoundedBytes<ConstU32<MAX_PROOF_BYTES>>;
+
+/// Bytes read per leaf: the `Twox64Concat(TreeId) ++ Twox64Concat(u64)` key and the 32-byte leaf.
+const LEAF_READ_BYTES: usize = 9 + 16 + 32;
 
 /// The precompile, generic over the runtime.
 pub struct ArxonZkPrecompile<R>(PhantomData<R>);
@@ -159,21 +162,44 @@ where
 		)))
 	}
 
-	/// Note commitment at `index` (insertion order).
+	/// Note commitment at `index` (insertion order). One storage read.
 	#[precompile::public("getNoteLeaf(uint256)")]
 	#[precompile::view]
 	fn get_note_leaf(handle: &mut impl PrecompileHandle, index: U256) -> EvmResult<H256> {
-		let want = u64::try_from(index).map_err(|_| revert("leaf index"))?;
+		let index = u64::try_from(index).map_err(|_| revert("unknown leaf"))?;
+		handle.record_db_read::<R>(LEAF_READ_BYTES)?;
+		pallet_note_tree::Pallet::<R>::leaf_at(TreeId::Note, index)
+			.map(|leaf| H256(leaf.0))
+			.ok_or_else(|| revert("unknown leaf"))
+	}
+
+	/// Up to `count` note commitments from `start` in insertion order, capped at
+	/// `MAX_LEAF_PAGE` and at the last leaf. Gas grows with the leaves returned,
+	/// not with the size of the tree, so a wallet syncs N notes in N / 1024 calls.
+	#[precompile::public("getNoteLeaves(uint256,uint256)")]
+	#[precompile::view]
+	fn get_note_leaves(
+		handle: &mut impl PrecompileHandle,
+		start: U256,
+		count: U256,
+	) -> EvmResult<Vec<H256>> {
+		let Ok(start) = u64::try_from(start) else {
+			return Ok(Vec::new());
+		};
+		let count = u32::try_from(count).unwrap_or(u32::MAX).min(MAX_LEAF_PAGE);
 		handle.record_db_read::<R>(8)?;
-		let count = pallet_note_tree::Pallet::<R>::leaf_count(TreeId::Note);
-		if want >= count {
-			return Err(revert("unknown leaf"));
+		let available =
+			pallet_note_tree::Pallet::<R>::leaf_count(TreeId::Note).saturating_sub(start);
+		// `record_db_read` charges one read whatever the size, so charge per leaf.
+		for _ in 0..available.min(u64::from(count)) {
+			handle.record_db_read::<R>(LEAF_READ_BYTES)?;
 		}
-		handle.record_db_read::<R>(48usize.saturating_mul(count.max(1) as usize))?;
-		match pallet_note_tree::Pallet::<R>::leaf_at(TreeId::Note, want) {
-			Some(leaf) => Ok(H256(leaf.0)),
-			None => Err(revert("unknown leaf")),
-		}
+		Ok(
+			pallet_note_tree::Pallet::<R>::leaves(TreeId::Note, start, count)
+				.into_iter()
+				.map(|leaf| H256(leaf.0))
+				.collect(),
+		)
 	}
 }
 

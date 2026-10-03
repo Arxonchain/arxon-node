@@ -93,6 +93,8 @@ pub type AbiInputs = BoundedVec<AbiInput, ConstU32<MAX_NOTES>>;
 /// The submission precompile, generic over the runtime.
 pub struct ArxonZkSubmitPrecompile<R>(PhantomData<R>);
 
+// The Solidity ABI fixes each method's arguments, mirroring the pallet calls.
+#[allow(clippy::too_many_arguments)]
 #[precompile_utils::precompile]
 impl<R> ArxonZkSubmitPrecompile<R>
 where

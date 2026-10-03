@@ -143,12 +143,14 @@ pub type CheckedExtrinsic =
 pub type SignedPayload = generic::SignedPayload<RuntimeCall, SignedExtra>;
 
 /// Executive: handles dispatch to the various modules.
-/// Migrations of the zero-knowledge upgrade (spec 2) for chains that ran spec 1.
-/// Each one is versioned and does nothing on a chain created with spec 2.
+/// Versioned storage migrations; each runs once and is a no-op on a chain that
+/// already has the target version. Spec 2 brought the zero-knowledge pallets to
+/// chains that ran spec 1; spec 5 indexes note tree leaves by position.
 pub type Migrations = (
 	pallet_zk_verifier::migrations::V0ToV1<Runtime>,
 	pallet_note_tree::migrations::V0ToV1<Runtime>,
 	pallet_ptr::migrations::V0ToV1<Runtime>,
+	pallet_note_tree::migrations::V1ToV2<Runtime>,
 );
 
 pub type Executive = frame_executive::Executive<
@@ -196,7 +198,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: Cow::Borrowed("arxon"),
 	impl_name: Cow::Borrowed("arxon"),
 	authoring_version: 1,
-	spec_version: 4,
+	spec_version: 5,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 2,
@@ -1117,6 +1119,15 @@ impl_runtime_apis! {
 				.ok()
 				.and_then(ZkVerifier::circuit)
 				.is_some_and(|c| c.enabled)
+		}
+
+		fn leaves(tree: u8, start: u64, count: u32) -> Option<Vec<[u8; 32]>> {
+			let tree = match tree {
+				0 => pallet_note_tree::TreeId::Note,
+				1 => pallet_note_tree::TreeId::Membership,
+				_ => return None,
+			};
+			Some(NoteTree::leaves(tree, start, count).into_iter().map(|leaf| leaf.0).collect())
 		}
 	}
 

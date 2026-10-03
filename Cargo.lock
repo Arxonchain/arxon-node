@@ -7734,6 +7734,7 @@ dependencies = [
  "pallet-evm",
  "pallet-note-tree",
  "pallet-nullifier-registry",
+ "pallet-privacy",
  "pallet-timestamp",
  "pallet-zk-verifier",
  "parity-scale-codec",

@@ -324,3 +324,109 @@ fn migration_builds_the_empty_subtree_chains_of_both_trees() {
 		assert_eq!(NoteTree::on_chain_storage_version(), 1);
 	});
 }
+
+// --- position index --------------------------------------------------------------------------
+
+#[test]
+fn leaf_at_returns_each_leaf_by_insertion_index() {
+	new_test_ext().execute_with(|| {
+		for i in 1..=5 {
+			assert_ok!(NoteTree::insert(TreeId::Note, &leaf(i)));
+		}
+
+		for i in 0..5u64 {
+			assert_eq!(NoteTree::leaf_at(TreeId::Note, i), Some(leaf(i + 1)));
+		}
+		assert_eq!(NoteTree::leaf_at(TreeId::Note, 5), None);
+	});
+}
+
+#[test]
+fn leaf_at_keeps_the_two_trees_apart() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(NoteTree::insert(TreeId::Note, &leaf(1)));
+		assert_ok!(NoteTree::insert(TreeId::Membership, &leaf(2)));
+
+		assert_eq!(NoteTree::leaf_at(TreeId::Note, 0), Some(leaf(1)));
+		assert_eq!(NoteTree::leaf_at(TreeId::Membership, 0), Some(leaf(2)));
+	});
+}
+
+#[test]
+fn leaf_at_is_unchanged_by_a_rejected_insert() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(NoteTree::insert(TreeId::Note, &leaf(1)));
+
+		assert!(NoteTree::insert(TreeId::Note, &leaf(1)).is_err());
+
+		assert_eq!(NoteTree::leaf_at(TreeId::Note, 1), None);
+	});
+}
+
+#[test]
+fn leaves_returns_a_page_in_order() {
+	new_test_ext().execute_with(|| {
+		for i in 1..=6 {
+			assert_ok!(NoteTree::insert(TreeId::Note, &leaf(i)));
+		}
+
+		assert_eq!(
+			NoteTree::leaves(TreeId::Note, 2, 3),
+			vec![leaf(3), leaf(4), leaf(5)]
+		);
+	});
+}
+
+#[test]
+fn leaves_stops_at_the_last_leaf() {
+	new_test_ext().execute_with(|| {
+		for i in 1..=3 {
+			assert_ok!(NoteTree::insert(TreeId::Note, &leaf(i)));
+		}
+
+		assert_eq!(
+			NoteTree::leaves(TreeId::Note, 1, 100),
+			vec![leaf(2), leaf(3)]
+		);
+		assert!(NoteTree::leaves(TreeId::Note, 3, 100).is_empty());
+		assert!(NoteTree::leaves(TreeId::Note, u64::MAX, u32::MAX).is_empty());
+	});
+}
+
+#[test]
+fn leaves_caps_a_page_at_max_leaf_page() {
+	new_test_ext().execute_with(|| {
+		crate::NextLeafIndex::<Test>::insert(TreeId::Note, u64::from(crate::MAX_LEAF_PAGE) + 10);
+		for i in 0..u64::from(crate::MAX_LEAF_PAGE) + 10 {
+			crate::LeafAt::<Test>::insert(TreeId::Note, i, FieldBytes::from_u64(i + 1));
+		}
+
+		let page = NoteTree::leaves(TreeId::Note, 0, u32::MAX);
+
+		assert_eq!(page.len(), crate::MAX_LEAF_PAGE as usize);
+		assert_eq!(page[0], FieldBytes::from_u64(1));
+	});
+}
+
+#[test]
+fn migration_indexes_existing_leaves_by_position() {
+	use frame_support::traits::{GetStorageVersion, OnRuntimeUpgrade, StorageVersion};
+
+	new_test_ext().execute_with(|| {
+		for i in 1..=4 {
+			assert_ok!(NoteTree::insert(TreeId::Note, &leaf(i)));
+		}
+		assert_ok!(NoteTree::insert(TreeId::Membership, &leaf(9)));
+		let _ = crate::LeafAt::<Test>::clear(u32::MAX, None);
+		StorageVersion::new(1).put::<NoteTree>();
+
+		crate::migrations::V1ToV2::<Test>::on_runtime_upgrade();
+
+		assert_eq!(
+			NoteTree::leaves(TreeId::Note, 0, 10),
+			vec![leaf(1), leaf(2), leaf(3), leaf(4)]
+		);
+		assert_eq!(NoteTree::leaf_at(TreeId::Membership, 0), Some(leaf(9)));
+		assert_eq!(NoteTree::on_chain_storage_version(), 2);
+	});
+}

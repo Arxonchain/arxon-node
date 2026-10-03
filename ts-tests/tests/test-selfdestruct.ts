@@ -4,7 +4,7 @@ import { AbiItem } from "web3-utils";
 
 import SelfDestructAfterCreate2 from "../build/contracts/SelfDestructAfterCreate2.json";
 import { GENESIS_ACCOUNT, GENESIS_ACCOUNT_PRIVATE_KEY, FIRST_CONTRACT_ADDRESS } from "./config";
-import { createAndFinalizeBlock, customRequest, describeWithFrontier } from "./util";
+import { createAndFinalizeBlock, customRequest, describeWithFrontier, sealUntilMined } from "./util";
 
 chaiUse(chaiAsPromised);
 
@@ -59,20 +59,14 @@ describeWithFrontier("Test self-destruct contract", (context) => {
 			gasPrice: "0x3B9ACA00",
 		});
 
-		let tx1 = contract.methods.step1().send({ from: GENESIS_ACCOUNT, gas: "0x100000", nonce: nonce++ });
-
-		let tx2 = contract.methods.step2().send({ from: GENESIS_ACCOUNT, gas: "0x100000", nonce: nonce++ });
-
-		let tx3 = contract.methods
-			.cannotRecreateInTheSameCall()
-			.send(
-				{ from: GENESIS_ACCOUNT, gas: "0x100000", nonce: nonce++ },
-				async (_hash) => await createAndFinalizeBlock(context.web3)
-			);
-
-		const { transactionHash: tx1Hash } = await tx1;
-		const { transactionHash: tx2Hash } = await tx2;
-		const { transactionHash: tx3Hash } = await tx3;
+		const [{ transactionHash: tx1Hash }, { transactionHash: tx2Hash }, { transactionHash: tx3Hash }]: any[] =
+			await sealUntilMined(context.web3, [
+				contract.methods.step1().send({ from: GENESIS_ACCOUNT, gas: "0x100000", nonce: nonce++ }),
+				contract.methods.step2().send({ from: GENESIS_ACCOUNT, gas: "0x100000", nonce: nonce++ }),
+				contract.methods
+					.cannotRecreateInTheSameCall()
+					.send({ from: GENESIS_ACCOUNT, gas: "0x100000", nonce: nonce++ }),
+			]);
 
 		for (let txHash of [tx1Hash, tx2Hash, tx3Hash]) {
 			const receipt = await context.web3.eth.getTransactionReceipt(txHash);

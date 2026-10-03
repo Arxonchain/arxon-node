@@ -49,6 +49,24 @@ export async function createAndFinalizeBlock(web3: Web3, finalize: boolean = tru
 	await new Promise<void>((resolve) => setTimeout(() => resolve(), 500));
 }
 
+// Seals blocks until every sent transaction is mined. A test that sends several
+// transactions and seals as soon as one hash returns can race the pool: the block
+// misses a transaction and, with manual sealing, it never gets mined. Waiting for
+// every hash first, then sealing until all receipts exist, removes the race.
+export async function sealUntilMined<T>(web3: Web3, sends: any[]): Promise<T[]> {
+	const hashes: string[] = await Promise.all(
+		sends.map(
+			(send) => new Promise<string>((resolve, reject) => send.once("transactionHash", resolve).catch(reject))
+		)
+	);
+	for (let attempt = 0; attempt < 5; attempt++) {
+		await createAndFinalizeBlock(web3);
+		const receipts = await Promise.all(hashes.map((hash) => web3.eth.getTransactionReceipt(hash)));
+		if (receipts.every((receipt) => receipt)) break;
+	}
+	return Promise.all(sends);
+}
+
 // Create a block and finalize it.
 // It will include all previously executed transactions since the last finalized block.
 export async function createAndFinalizeBlockNowait(web3: Web3) {

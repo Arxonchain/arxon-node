@@ -3,7 +3,7 @@ import { AbiItem } from "web3-utils";
 
 import Test from "../build/contracts/Storage.json";
 import { GENESIS_ACCOUNT, GENESIS_ACCOUNT_PRIVATE_KEY, FIRST_CONTRACT_ADDRESS } from "./config";
-import { createAndFinalizeBlock, customRequest, describeWithFrontier } from "./util";
+import { createAndFinalizeBlock, customRequest, describeWithFrontier, sealUntilMined } from "./util";
 
 describeWithFrontier("Frontier RPC (Contract)", (context) => {
 	const TEST_CONTRACT_BYTECODE = Test.bytecode;
@@ -94,24 +94,11 @@ describeWithFrontier("Frontier RPC (Contract)", (context) => {
 
 		const promisify = (inner) => new Promise((resolve, reject) => inner(resolve, reject));
 
-		let tx1 = contract.methods
-			.setStorage("0x2A", "0x1")
-			.send({ from: GENESIS_ACCOUNT, gas: "0x100000", nonce: nonce++ });
-
-		let tx2 = contract.methods
-			.setStorage("0x2A", "0x1")
-			.send({ from: GENESIS_ACCOUNT, gas: "0x100000", nonce: nonce++ });
-
-		let tx3 = contract.methods
-			.setStorage("0x2A", "0x2")
-			.send(
-				{ from: GENESIS_ACCOUNT, gas: "0x100000", nonce: nonce++ },
-				async (hash) => await createAndFinalizeBlock(context.web3)
-			);
-
-		tx1 = await tx1;
-		tx2 = await tx2;
-		tx3 = await tx3;
+		const [tx1, tx2, tx3]: any[] = await sealUntilMined(context.web3, [
+			contract.methods.setStorage("0x2A", "0x1").send({ from: GENESIS_ACCOUNT, gas: "0x100000", nonce: nonce++ }),
+			contract.methods.setStorage("0x2A", "0x1").send({ from: GENESIS_ACCOUNT, gas: "0x100000", nonce: nonce++ }),
+			contract.methods.setStorage("0x2A", "0x2").send({ from: GENESIS_ACCOUNT, gas: "0x100000", nonce: nonce++ }),
+		]);
 
 		// cost minus SSTORE
 		const baseCost = 24029;

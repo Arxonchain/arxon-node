@@ -3,7 +3,7 @@
 
 use arxon_zk_primitives::FieldBytes;
 use frame_benchmarking::v2::*;
-use pallet_privacy::ReceiptSink;
+use pallet_privacy::{PrivacyAsset, ReceiptSink};
 
 use super::*;
 
@@ -15,10 +15,11 @@ mod benchmarks {
 	fn record() {
 		let ptr_id = FieldBytes::from_u64(0x9717);
 		let cv = FieldBytes::from_u64(0xc0de);
+		let token = PrivacyAsset::Arx20([0x20; 20].into());
 
 		#[block]
 		{
-			<Pallet<T> as ReceiptSink>::record(ptr_id, cv, 0b0111).expect("fresh receipt");
+			<Pallet<T> as ReceiptSink>::record(ptr_id, cv, 0b0111, token).expect("fresh receipt");
 		}
 
 		assert_eq!(Pallet::<T>::receipt(&ptr_id).map(|r| r.cv), Some(cv));

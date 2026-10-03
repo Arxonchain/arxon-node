@@ -4,7 +4,9 @@
 //! transfers 40 to Bob's shielded key with 2 of change while hiding sender,
 //! receiver and amount, and Bob unshields his 40 to Baltathar's transparent
 //! account. Then two proofs that must fail: a flipped byte, and a bundle
-//! re-targeted to another recipient.
+//! re-targeted to another recipient. Relayed bundles pay their relayer from
+//! the pool, hide-balance blocks unshields, and a 6-decimal ARX-20 token
+//! shields amounts in its own unit.
 
 use arxon_zk::{
 	circuits::{C1Circuit, C2Circuit, C3Circuit, C4Circuit, C5Circuit, C6Circuit},
@@ -25,7 +27,8 @@ use hex_literal::hex;
 use pallet_note_tree::{MerkleTree, TreeId};
 use pallet_privacy::{
 	pallet::{Intent, ValueFlow},
-	ComplianceAttachment, Input, Inputs, Output, Outputs, PrivacyAsset, ProofBundle, PtrAttachment,
+	ComplianceAttachment, HideBalanceAccounts, Input, Inputs, Output, Outputs, PrivacyAsset,
+	ProofBundle, PtrAttachment, RelayFee, RelayFeeOf,
 };
 use rand_core::OsRng;
 use sp_runtime::BuildStorage;
@@ -44,6 +47,11 @@ fn alith() -> AccountId {
 
 fn baltathar() -> AccountId {
 	AccountId::from(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0"))
+}
+
+/// The relayer of the relayed bundles.
+fn charleth() -> AccountId {
+	AccountId::from(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc"))
 }
 
 fn units(n: u64) -> Balance {
@@ -91,7 +99,8 @@ fn input_arg(s: &SpendNote) -> Input {
 	}
 }
 
-/// Optional attachments of a bundle: a receipt for one output, a membership proof for one output.
+/// Optional parts of a bundle: a receipt for one output, a membership proof
+/// for one output, a relayer fee, and the pool (native ARX when `None`).
 #[derive(Default)]
 struct Attachments {
 	receipt: Option<(u8, Receipt)>,
@@ -99,6 +108,8 @@ struct Attachments {
 		u8,
 		arxon_zk::gadgets::merkle::MerklePath<{ arxon_zk::primitives::MEMBER_TREE_DEPTH }>,
 	)>,
+	fee: Option<RelayFeeOf<Runtime>>,
+	asset: Option<PrivacyAsset>,
 }
 
 impl Attachments {
@@ -143,8 +154,10 @@ fn prove_bundle_with(
 	value: ValueFlow<Runtime>,
 	attachments: &Attachments,
 ) -> ProofBundle {
+	let asset = attachments.asset.unwrap_or(PrivacyAsset::Native);
+	let unit = Privacy::unit_of(asset);
 	let intent = Intent::<Runtime> {
-		asset: PrivacyAsset::Native,
+		asset,
 		anchor,
 		inputs: Inputs::truncate_from(spends.iter().map(input_arg).collect()),
 		outputs: Outputs::truncate_from(outputs.iter().map(output_arg).collect()),
@@ -154,12 +167,15 @@ fn prove_bundle_with(
 		ptr: attachments.ptr(),
 		compliance: attachments.compliance(),
 		value,
+		fee: attachments.fee.clone(),
+		signer: None,
 	};
 	let (transparent_in, transparent_out) = match &intent.value {
-		ValueFlow::Shield { amount, .. } => ((*amount / SHIELDED_UNIT) as u64, 0),
-		ValueFlow::Unshield { amount, .. } => (0, (*amount / SHIELDED_UNIT) as u64),
+		ValueFlow::Shield { amount, .. } => ((*amount / unit) as u64, 0),
+		ValueFlow::Unshield { amount, .. } => (0, (*amount / unit) as u64),
 		ValueFlow::Transfer => (0, 0),
 	};
+	let fee = attachments.fee.as_ref().map_or(0, |f| (f.amount / unit) as u64);
 	let digest = Privacy::bundle_digest_for(&intent).expect("valid intent");
 	let ctx = BundleContext {
 		mask,
@@ -167,6 +183,7 @@ fn prove_bundle_with(
 		expiry_block: EXPIRY,
 		transparent_in,
 		transparent_out,
+		fee,
 	};
 	let spend = (!spends.is_empty())
 		.then(|| proof_of(prove::<C3Circuit>(&spend_witnesses(spends, &ctx), OsRng).unwrap()));
@@ -427,7 +444,7 @@ fn unshield_retargeted_to_another_recipient_is_rejected() {
 
 #[test]
 fn runtime_api_reports_the_shielded_pool_state() {
-	use arxon_zk_runtime_api::runtime_decl_for_arxon_zk_api::ArxonZkApiV2;
+	use arxon_zk_runtime_api::runtime_decl_for_arxon_zk_api::ArxonZkApiV3;
 
 	dev_ext().execute_with(|| {
 		assert_eq!(Runtime::note_tree_root(), NoteTree::root(TreeId::Note).0);
@@ -444,6 +461,8 @@ fn runtime_api_reports_the_shielded_pool_state() {
 		assert!(Runtime::circuit_enabled(1));
 		assert!(Runtime::circuit_enabled(3));
 		assert!(!Runtime::circuit_enabled(7));
+		assert!(!Runtime::balance_hidden(baltathar().into()));
+		assert_eq!(Runtime::arx20_shielded_unit([0x20; 20]), SHIELDED_UNIT);
 	});
 }
 
@@ -482,7 +501,7 @@ fn receipt_attached_to_a_private_payment_can_be_disclosed_to_an_auditor() {
 		let receipt = Receipt::new(&alice, to_bob, &mut rng);
 		let attachments = Attachments {
 			receipt: Some((0, receipt)),
-			membership: None,
+			..Default::default()
 		};
 		let anchor = fp_to_bytes(&reference.root());
 		let proofs = prove_bundle_with(
@@ -547,6 +566,7 @@ fn receipt_attached_to_a_private_payment_can_be_disclosed_to_an_auditor() {
 		));
 		System::assert_has_event(
 			pallet_ptr::Event::<Runtime>::Disclosed {
+				asset: Some(PrivacyAsset::Native),
 				ptr_id: receipt.ptr_id_bytes(),
 				verifier: baltathar(),
 				disclosure_mask: 0b0011,
@@ -615,8 +635,8 @@ fn payment_to_a_registered_counterparty_carries_a_membership_attestation() {
 		let spend = SpendNote::new(alice, shielded.note, reference.path(0), &mut rng);
 		let to_exchange = OutputNote::new(exchange.pk(), 42, &mut rng);
 		let attachments = Attachments {
-			receipt: None,
 			membership: Some((0, registry.path(index))),
+			..Default::default()
 		};
 		let anchor = fp_to_bytes(&reference.root());
 		let proofs = prove_bundle_with(
@@ -647,5 +667,301 @@ fn payment_to_a_registered_counterparty_carries_a_membership_attestation() {
 			)
 		});
 		assert!(attested, "compliance attestation event emitted");
+	});
+}
+
+/// Shields `amount` ARX from Alith into one note of `owner` and returns it with
+/// the reference tree that now holds it.
+fn shield_one(owner: &SpendingKey, amount: u64) -> (OutputNote, ReferenceNoteTree) {
+	let mut rng = OsRng;
+	let mut reference = ReferenceNoteTree::new(TreeKind::Note);
+	let shielded = OutputNote::new(owner.pk(), amount, &mut rng);
+	let proofs = prove_bundle(
+		&[],
+		&[shielded],
+		None,
+		0,
+		ValueFlow::Shield {
+			depositor: alith(),
+			amount: units(amount),
+		},
+	);
+	assert_ok!(Privacy::shield(
+		RuntimeOrigin::signed(alith()),
+		units(amount),
+		outputs_arg(&[shielded]),
+		0,
+		EXPIRY,
+		proofs
+	));
+	reference.insert(shielded.note.commitment());
+	(shielded, reference)
+}
+
+fn relay_fee(n: u64, recipient: AccountId) -> RelayFeeOf<Runtime> {
+	RelayFee {
+		amount: units(n),
+		recipient,
+	}
+}
+
+#[test]
+fn relayed_unshield_pays_the_relayer_from_the_pool() {
+	dev_ext().execute_with(|| {
+		let mut rng = OsRng;
+		let alice = SpendingKey::random(&mut rng);
+		let (shielded, reference) = shield_one(&alice, 42);
+		let spend = SpendNote::new(alice, shielded.note, reference.path(0), &mut rng);
+		let anchor = fp_to_bytes(&reference.root());
+		let attachments = Attachments {
+			fee: Some(relay_fee(2, charleth())),
+			..Default::default()
+		};
+		let proofs = prove_bundle_with(
+			std::slice::from_ref(&spend),
+			&[],
+			Some(anchor),
+			0,
+			ValueFlow::Unshield {
+				recipient: baltathar(),
+				amount: units(40),
+			},
+			&attachments,
+		);
+		let baltathar_before = Balances::balance(&baltathar());
+		let charleth_before = Balances::balance(&charleth());
+
+		assert_ok!(Privacy::unshield_with_fee(
+			RuntimeOrigin::signed(charleth()),
+			baltathar(),
+			units(40),
+			anchor,
+			inputs_arg(std::slice::from_ref(&spend)),
+			outputs_arg(&[]),
+			0,
+			EXPIRY,
+			relay_fee(2, charleth()),
+			proofs,
+		));
+
+		assert_eq!(
+			Balances::balance(&baltathar()),
+			baltathar_before + units(40)
+		);
+		assert_eq!(
+			Balances::balance(&charleth()),
+			charleth_before + units(2),
+			"the relayer is paid from the pool and paid nothing for the extrinsic in this test"
+		);
+		assert_eq!(Privacy::pool_balance(), 0);
+	});
+}
+
+#[test]
+fn a_relayer_cannot_redirect_or_raise_its_fee() {
+	dev_ext().execute_with(|| {
+		let mut rng = OsRng;
+		let alice = SpendingKey::random(&mut rng);
+		let bob = SpendingKey::random(&mut rng);
+		let (shielded, reference) = shield_one(&alice, 42);
+		let spend = SpendNote::new(alice, shielded.note, reference.path(0), &mut rng);
+		let to_bob = OutputNote::new(bob.pk(), 40, &mut rng);
+		let anchor = fp_to_bytes(&reference.root());
+		let attachments = Attachments {
+			fee: Some(relay_fee(2, charleth())),
+			..Default::default()
+		};
+		let proofs = prove_bundle_with(
+			std::slice::from_ref(&spend),
+			&[to_bob],
+			Some(anchor),
+			MASK_ALL_HIDDEN,
+			ValueFlow::Transfer,
+			&attachments,
+		);
+		let submit = |fee: RelayFeeOf<Runtime>| {
+			Privacy::submit_private_transfer_with_fee(
+				RuntimeOrigin::signed(baltathar()),
+				anchor,
+				inputs_arg(std::slice::from_ref(&spend)),
+				outputs_arg(&[to_bob]),
+				MASK_ALL_HIDDEN,
+				EXPIRY,
+				None,
+				None,
+				fee,
+				proofs.clone(),
+			)
+		};
+
+		assert_eq!(
+			submit(relay_fee(2, baltathar())),
+			Err(pallet_zk_verifier::Error::<Runtime>::InvalidProof.into())
+		);
+		assert_eq!(
+			submit(relay_fee(3, charleth())),
+			Err(pallet_zk_verifier::Error::<Runtime>::InvalidProof.into())
+		);
+		assert_ok!(submit(relay_fee(2, charleth())));
+		assert_eq!(Privacy::pool_balance(), units(40));
+	});
+}
+
+#[test]
+fn a_bundle_marked_hide_balance_pays_privately_but_cannot_unshield() {
+	dev_ext().execute_with(|| {
+		let mut rng = OsRng;
+		let alice = SpendingKey::random(&mut rng);
+		let bob = SpendingKey::random(&mut rng);
+		let (shielded, mut reference) = shield_one(&alice, 42);
+		let hide_balance = 0b1000;
+
+		let spend = SpendNote::new(alice, shielded.note, reference.path(0), &mut rng);
+		let to_bob = OutputNote::new(bob.pk(), 40, &mut rng);
+		let change = OutputNote::new(alice.pk(), 2, &mut rng);
+		let anchor = fp_to_bytes(&reference.root());
+		let proofs = prove_bundle(
+			std::slice::from_ref(&spend),
+			&[to_bob, change],
+			Some(anchor),
+			hide_balance,
+			ValueFlow::Transfer,
+		);
+		assert_ok!(Privacy::submit_private_transfer(
+			RuntimeOrigin::signed(baltathar()),
+			anchor,
+			inputs_arg(std::slice::from_ref(&spend)),
+			outputs_arg(&[to_bob, change]),
+			hide_balance,
+			EXPIRY,
+			None,
+			None,
+			proofs,
+		));
+		reference.insert(to_bob.note.commitment());
+		reference.insert(change.note.commitment());
+
+		let bob_spend = SpendNote::new(bob, to_bob.note, reference.path(1), &mut rng);
+		let anchor = fp_to_bytes(&reference.root());
+		let proofs = prove_bundle(
+			std::slice::from_ref(&bob_spend),
+			&[],
+			Some(anchor),
+			hide_balance,
+			ValueFlow::Unshield {
+				recipient: baltathar(),
+				amount: units(40),
+			},
+		);
+
+		assert_eq!(
+			Privacy::unshield(
+				RuntimeOrigin::signed(baltathar()),
+				baltathar(),
+				units(40),
+				anchor,
+				inputs_arg(std::slice::from_ref(&bob_spend)),
+				outputs_arg(&[]),
+				hide_balance,
+				EXPIRY,
+				proofs,
+			),
+			Err(pallet_privacy::Error::<Runtime>::HideBalanceForbidsUnshield.into())
+		);
+		assert_eq!(Privacy::pool_balance(), units(42));
+	});
+}
+
+#[test]
+fn pool_value_is_not_unshielded_to_an_account_that_hides_its_balance() {
+	dev_ext().execute_with(|| {
+		let mut rng = OsRng;
+		let alice = SpendingKey::random(&mut rng);
+		let (shielded, reference) = shield_one(&alice, 42);
+		// A flag set long ago, so already in force (the delay is a pallet test).
+		HideBalanceAccounts::<Runtime>::insert(baltathar(), true);
+		let spend = SpendNote::new(alice, shielded.note, reference.path(0), &mut rng);
+		let anchor = fp_to_bytes(&reference.root());
+		let proofs = prove_bundle(
+			std::slice::from_ref(&spend),
+			&[],
+			Some(anchor),
+			0,
+			ValueFlow::Unshield {
+				recipient: baltathar(),
+				amount: units(42),
+			},
+		);
+
+		assert_eq!(
+			Privacy::unshield(
+				RuntimeOrigin::signed(charleth()),
+				baltathar(),
+				units(42),
+				anchor,
+				inputs_arg(std::slice::from_ref(&spend)),
+				outputs_arg(&[]),
+				0,
+				EXPIRY,
+				proofs,
+			),
+			Err(pallet_privacy::Error::<Runtime>::RecipientHidesBalance.into())
+		);
+		assert!(!NullifierRegistry::is_spent(&spend.nullifier_bytes()));
+	});
+}
+
+/// A token contract (any code that is not an EIP-7702 delegation) at `token`.
+fn deploy_token(token: sp_core::H160) {
+	pallet_evm::Pallet::<Runtime>::create_account(token, vec![0x60, 0x00, 0x60, 0x00, 0xf3], None)
+		.expect("code stored");
+}
+
+#[test]
+fn a_six_decimal_token_shields_in_its_own_unit() {
+	use arxon_zk_runtime_api::runtime_decl_for_arxon_zk_api::ArxonZkApiV3;
+
+	dev_ext().execute_with(|| {
+		let mut rng = OsRng;
+		let token = sp_core::H160::repeat_byte(0x66);
+		let token_account = AccountId::from(token);
+		deploy_token(token);
+		assert_ok!(Privacy::set_arx20_unit(
+			RuntimeOrigin::signed(token_account),
+			token,
+			6
+		));
+		assert_eq!(Runtime::arx20_shielded_unit(token.0), 1);
+		let alice = SpendingKey::random(&mut rng);
+		// 0.000005 of the token: five base units, below what a 10^9 unit could carry.
+		let shielded = OutputNote::new(alice.pk(), 5, &mut rng);
+		let attachments = Attachments {
+			asset: Some(PrivacyAsset::Arx20(token)),
+			..Default::default()
+		};
+		let proofs = prove_bundle_with(
+			&[],
+			&[shielded],
+			None,
+			0,
+			ValueFlow::Shield {
+				depositor: token_account,
+				amount: 5,
+			},
+			&attachments,
+		);
+
+		assert_ok!(Privacy::shield_arx20(
+			RuntimeOrigin::signed(token_account),
+			token,
+			5,
+			outputs_arg(&[shielded]),
+			0,
+			EXPIRY,
+			proofs,
+		));
+
+		assert_eq!(NoteTree::leaf_count(TreeId::Arx20(token)), 1);
+		assert_eq!(NoteTree::leaf_count(TreeId::Note), 0);
 	});
 }

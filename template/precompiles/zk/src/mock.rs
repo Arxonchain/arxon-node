@@ -163,6 +163,7 @@ impl pallet_privacy::Config for Runtime {
 	type Trees = NoteTree;
 	type Receipts = ();
 	type TokenToAccount = pallet_privacy::FromH160;
+	type Arx20Tokens = frame_support::traits::Everything;
 	type WeightInfo = ();
 }
 

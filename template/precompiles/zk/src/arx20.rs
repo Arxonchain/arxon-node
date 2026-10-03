@@ -10,6 +10,16 @@
 //!
 //! View methods take the token address so wallets can query without
 //! impersonating the contract.
+//!
+//! Only contracts run a pool: the chain refuses a caller without code (an EOA)
+//! or whose code is an EIP-7702 delegation. The one exception is
+//! `setShieldedDecimals`, which a token calls from its constructor, before its
+//! code is stored; it fixes the shielded unit (`10^(decimals - 9)` base units,
+//! 1 for 9 decimals or fewer) once, while the pool is empty.
+//!
+//! The `WithFee` variants bind a relayer fee in token units into the proofs.
+//! The pool records it; the token mints it to `feeRecipient`, like the
+//! unshielded amount.
 
 use alloc::vec::Vec;
 use core::marker::PhantomData;
@@ -22,12 +32,12 @@ use pallet_note_tree::{MerkleTree, TreeId, MAX_LEAF_PAGE};
 use pallet_privacy::Call as PrivacyCall;
 use precompile_utils::prelude::*;
 use sp_core::{H160, H256, U256};
-use sp_runtime::traits::Dispatchable;
+use sp_runtime::{traits::Dispatchable, SaturatedConversion};
 
 use crate::submit::{
 	ensure_direct_call, ensure_no_value, signed_origin, to_balance, to_block_number, to_compliance,
-	to_inputs, to_outputs, to_proofs, to_ptr, AbiInputs, AbiOptionalAttachment, AbiOutputs,
-	AbiProofs,
+	to_inputs, to_outputs, to_proofs, to_ptr, to_relay_fee, AbiInputs, AbiOptionalAttachment,
+	AbiOutputs, AbiProofs,
 };
 use crate::LEAF_READ_BYTES;
 
@@ -157,6 +167,113 @@ where
 			0,
 		)?;
 		Ok(())
+	}
+
+	/// [`Self::unshield`] with a relayer fee the token mints to `feeRecipient`.
+	#[precompile::public(
+		"unshieldWithFee(address,uint256,bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,address,uint256,(bytes,bytes,bytes,bytes,bytes))"
+	)]
+	fn unshield_with_fee(
+		handle: &mut impl PrecompileHandle,
+		recipient: Address,
+		amount: U256,
+		anchor: H256,
+		inputs: AbiInputs,
+		outputs: AbiOutputs,
+		mask_bits: u8,
+		expiry_block: U256,
+		fee_recipient: Address,
+		fee: U256,
+		proofs: AbiProofs,
+	) -> EvmResult {
+		ensure_direct_call(handle)?;
+		ensure_no_value(handle)?;
+		let token = caller_token(handle)?;
+		let recipient = R::AddressMapping::into_account_id(recipient.into());
+		RuntimeHelper::<R>::try_dispatch(
+			handle,
+			signed_origin::<R>(handle),
+			PrivacyCall::<R>::unshield_arx20_with_fee {
+				token,
+				recipient,
+				amount: to_balance::<R>(amount)?,
+				anchor: FieldBytes(anchor.0),
+				inputs: to_inputs(inputs)?,
+				outputs: to_outputs(outputs)?,
+				mask_bits,
+				expiry_block: to_block_number::<R>(expiry_block)?,
+				fee: to_relay_fee::<R>(fee_recipient, fee)?,
+				proofs: to_proofs(proofs)?,
+			},
+			0,
+		)?;
+		Ok(())
+	}
+
+	/// [`Self::submit_private_transfer`] with a relayer fee the token mints to `feeRecipient`.
+	#[precompile::public(
+		"submitPrivateTransferWithFee(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),address,uint256,(bytes,bytes,bytes,bytes,bytes))"
+	)]
+	fn submit_private_transfer_with_fee(
+		handle: &mut impl PrecompileHandle,
+		anchor: H256,
+		inputs: AbiInputs,
+		outputs: AbiOutputs,
+		mask_bits: u8,
+		expiry_block: U256,
+		ptr: AbiOptionalAttachment,
+		compliance: AbiOptionalAttachment,
+		fee_recipient: Address,
+		fee: U256,
+		proofs: AbiProofs,
+	) -> EvmResult {
+		ensure_direct_call(handle)?;
+		ensure_no_value(handle)?;
+		let token = caller_token(handle)?;
+		RuntimeHelper::<R>::try_dispatch(
+			handle,
+			signed_origin::<R>(handle),
+			PrivacyCall::<R>::submit_private_transfer_arx20_with_fee {
+				token,
+				anchor: FieldBytes(anchor.0),
+				inputs: to_inputs(inputs)?,
+				outputs: to_outputs(outputs)?,
+				mask_bits,
+				expiry_block: to_block_number::<R>(expiry_block)?,
+				ptr: to_ptr(ptr)?,
+				compliance: to_compliance(compliance)?,
+				fee: to_relay_fee::<R>(fee_recipient, fee)?,
+				proofs: to_proofs(proofs)?,
+			},
+			0,
+		)?;
+		Ok(())
+	}
+
+	/// Fixes the caller token's shielded unit from its `decimals`. Once, while
+	/// its pool is empty; meant for the token's constructor.
+	#[precompile::public("setShieldedDecimals(uint8)")]
+	fn set_shielded_decimals(handle: &mut impl PrecompileHandle, decimals: u8) -> EvmResult {
+		ensure_direct_call(handle)?;
+		ensure_no_value(handle)?;
+		let token = caller_token(handle)?;
+		RuntimeHelper::<R>::try_dispatch(
+			handle,
+			signed_origin::<R>(handle),
+			PrivacyCall::<R>::set_arx20_unit { token, decimals },
+			0,
+		)?;
+		Ok(())
+	}
+
+	/// Base units of `token` per shielded unit (amounts and fees must be multiples).
+	#[precompile::public("shieldedUnit(address)")]
+	#[precompile::view]
+	fn shielded_unit(handle: &mut impl PrecompileHandle, token: Address) -> EvmResult<U256> {
+		handle.record_db_read::<R>(36)?;
+		let unit =
+			pallet_privacy::Pallet::<R>::unit_of(pallet_privacy::PrivacyAsset::Arx20(token.into()));
+		Ok(U256::from(unit.saturated_into::<u128>()))
 	}
 
 	/// Current root of `token`'s ARX-20 note tree.

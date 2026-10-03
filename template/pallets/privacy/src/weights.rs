@@ -36,6 +36,8 @@ pub trait WeightInfo {
 	/// `submit_private_transfer` with `inputs` spent and `outputs` created notes and the
 	/// optional receipt and membership attachments.
 	fn submit_private_transfer(inputs: u32, outputs: u32, ptr: bool, compliance: bool) -> Weight;
+	/// `set_arx20_unit`.
+	fn set_arx20_unit() -> Weight;
 }
 
 /// Composed weights: measured light extrinsics plus measured primitives of the ZK pallets.
@@ -52,13 +54,26 @@ impl<T: Config> SubstrateWeight<T> {
 		// Checks: duplicate bundle, known anchor, pool balance, spent nullifiers,
 		// duplicate leaves, revealed party lookups, membership root; then the
 		// bundle record and the shielded counter.
+		// Plus, on bundles that spend: the asset's unit, the hide-balance flag
+		// (value and change block) of the signer, the recipient and each revealed
+		// sender's registered owner, and the relayer fee transfer out of the pool.
+		// Charged whether or not the bundle carries a fee, so the weight does not
+		// depend on arguments the call macro cannot see cheaply. ARX-20 bundles
+		// also read the token's code size and, for a 23-byte code, the code
+		// itself (the EIP-7702 check); native bundles pay for it too.
+		let spends = inputs > 0;
 		let reads = 1
-			+ u64::from(inputs > 0)
+			+ u64::from(spends)
 			+ u64::from(transparent)
 			+ 2 * u64::from(inputs)
 			+ 2 * u64::from(outputs)
-			+ 1 + u64::from(compliance);
-		let writes = 2;
+			+ 1 + u64::from(compliance)
+			+ 1 + 2 + if spends {
+			4 + 3 * u64::from(inputs) + 2
+		} else {
+			0
+		};
+		let writes = 2 + if spends { 2 } else { 0 };
 		let mut w =
 			Weight::from_parts(BUNDLE_COMPUTE, 0).saturating_add(db.reads_writes(reads, writes));
 		if inputs > 0 {
@@ -120,6 +135,10 @@ impl<T: Config> WeightInfo for SubstrateWeight<T> {
 	fn submit_private_transfer(inputs: u32, outputs: u32, ptr: bool, compliance: bool) -> Weight {
 		Self::bundle(inputs, outputs, false, ptr, compliance)
 	}
+
+	fn set_arx20_unit() -> Weight {
+		<benchmarked::SubstrateWeight<T> as benchmarked::WeightInfo>::set_arx20_unit()
+	}
 }
 
 /// Pre-measurement placeholders (20 ms per verification and per insert), kept for mocks.
@@ -158,5 +177,9 @@ impl WeightInfo for () {
 
 	fn submit_private_transfer(inputs: u32, outputs: u32, ptr: bool, compliance: bool) -> Weight {
 		placeholder_bundle(inputs, outputs, ptr as u32 + compliance as u32)
+	}
+
+	fn set_arx20_unit() -> Weight {
+		Weight::from_parts(BASE, 2_048)
 	}
 }

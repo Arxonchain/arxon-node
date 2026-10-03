@@ -32,10 +32,10 @@ impl<T: Config> WeightInfo for SubstrateWeight<T> {
 	}
 
 	fn disclose() -> Weight {
-		// Receipt lookup and the resolution of up to two revealed parties, then
-		// the per-receipt disclosure counter (read and written).
+		// Receipt and asset lookups, the resolution of up to two revealed
+		// parties, then the per-receipt disclosure counter (read and written).
 		Weight::from_parts(DISCLOSE_COMPUTE, 0)
-			.saturating_add(T::DbWeight::get().reads_writes(4, 1))
+			.saturating_add(T::DbWeight::get().reads_writes(5, 1))
 			.saturating_add(T::ZkVerifier::verify_weight(CircuitId::DisclosureProof, 1))
 	}
 }

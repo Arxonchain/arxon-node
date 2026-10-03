@@ -39,6 +39,7 @@ pub trait WeightInfo {
 	fn set_privacy_default() -> Weight;
 	fn set_balance_visibility() -> Weight;
 	fn register_shielded_key() -> Weight;
+	fn set_arx20_unit() -> Weight;
 }
 
 /// Weights for pallet_privacy using the Substrate node and recommended hardware.
@@ -103,6 +104,12 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(6_u64))
 			.saturating_add(T::DbWeight::get().writes(5_u64))
 	}
+	/// Placeholder until `make benchmark-zk` measures it: a few reads and two writes.
+	fn set_arx20_unit() -> Weight {
+		Weight::from_parts(20_000_000, 3533)
+			.saturating_add(T::DbWeight::get().reads(6_u64))
+			.saturating_add(T::DbWeight::get().writes(4_u64))
+	}
 }
 
 // For backwards compatibility and tests
@@ -165,5 +172,11 @@ impl WeightInfo for () {
 		Weight::from_parts(19_913_000, 3533)
 			.saturating_add(RocksDbWeight::get().reads(6_u64))
 			.saturating_add(RocksDbWeight::get().writes(5_u64))
+	}
+	/// Placeholder until `make benchmark-zk` measures it: a few reads and two writes.
+	fn set_arx20_unit() -> Weight {
+		Weight::from_parts(20_000_000, 3533)
+			.saturating_add(RocksDbWeight::get().reads(6_u64))
+			.saturating_add(RocksDbWeight::get().writes(4_u64))
 	}
 }

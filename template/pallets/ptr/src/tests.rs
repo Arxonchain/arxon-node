@@ -2,11 +2,12 @@
 
 use arxon_zk_primitives::{CircuitId, FieldBytes, Proof, CHAIN_ID};
 use frame_support::{assert_noop, assert_ok, BoundedVec};
-use pallet_privacy::ReceiptSink;
+use pallet_privacy::{PrivacyAsset, ReceiptSink};
 
 use crate::{
 	mock::{new_test_ext, FakeVerifier, Ptr, RuntimeEvent, RuntimeOrigin, System, Test, AUDITOR},
-	DisclosureCount, Error, Event, ReceiptCommitment, Receipts, RevealedValues, TotalReceipts,
+	DisclosureCount, Error, Event, ReceiptAsset, ReceiptCommitment, Receipts, RevealedValues,
+	TotalReceipts,
 };
 
 fn fb(byte: u8) -> FieldBytes {
@@ -28,7 +29,7 @@ fn revealed() -> RevealedValues {
 const EXPIRY: u64 = 100;
 
 fn recorded_receipt() -> FieldBytes {
-	assert_ok!(Ptr::record(fb(1), fb(2), 0b0111));
+	assert_ok!(Ptr::record(fb(1), fb(2), 0b0111, PrivacyAsset::Native));
 	fb(1)
 }
 
@@ -50,7 +51,7 @@ fn record_stores_commitment_with_current_block_and_mask() {
 	new_test_ext().execute_with(|| {
 		System::set_block_number(9);
 
-		assert_ok!(Ptr::record(fb(1), fb(2), 0b0101));
+		assert_ok!(Ptr::record(fb(1), fb(2), 0b0101, PrivacyAsset::Native));
 
 		assert_eq!(
 			Receipts::<Test>::get(fb(1)),
@@ -67,9 +68,10 @@ fn record_stores_commitment_with_current_block_and_mask() {
 #[test]
 fn record_emits_receipt_created_without_parties() {
 	new_test_ext().execute_with(|| {
-		assert_ok!(Ptr::record(fb(1), fb(2), 0b0101));
+		assert_ok!(Ptr::record(fb(1), fb(2), 0b0101, PrivacyAsset::Native));
 
 		System::assert_last_event(RuntimeEvent::Ptr(Event::ReceiptCreated {
+			asset: PrivacyAsset::Native,
 			ptr_id: fb(1),
 			block_number: 1,
 			mask_bits: 0b0101,
@@ -80,10 +82,10 @@ fn record_emits_receipt_created_without_parties() {
 #[test]
 fn record_fails_when_receipt_already_exists() {
 	new_test_ext().execute_with(|| {
-		assert_ok!(Ptr::record(fb(1), fb(2), 0));
+		assert_ok!(Ptr::record(fb(1), fb(2), 0, PrivacyAsset::Native));
 
 		assert_noop!(
-			Ptr::record(fb(1), fb(3), 0),
+			Ptr::record(fb(1), fb(3), 0, PrivacyAsset::Native),
 			Error::<Test>::ReceiptAlreadyExists
 		);
 	});
@@ -132,6 +134,7 @@ fn disclose_emits_disclosed_with_only_the_revealed_fields() {
 		assert_ok!(disclose(ptr_id, 0b0010));
 
 		System::assert_last_event(RuntimeEvent::Ptr(Event::Disclosed {
+			asset: Some(PrivacyAsset::Native),
 			ptr_id,
 			verifier: AUDITOR,
 			disclosure_mask: 0b0010,
@@ -284,5 +287,67 @@ fn migration_deletes_the_plaintext_receipts_and_codes_of_version_0() {
 		}
 		assert_eq!(crate::TotalReceipts::<Test>::get(), 0);
 		assert_eq!(Ptr::on_chain_storage_version(), 1);
+	});
+}
+
+// --- asset ------------------------------------------------------------------------------------------
+
+fn token() -> PrivacyAsset {
+	PrivacyAsset::Arx20(sp_core::H160::repeat_byte(0x20))
+}
+
+#[test]
+fn record_keeps_the_pool_the_payment_was_made_in() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(Ptr::record(fb(1), fb(2), 0, token()));
+
+		assert_eq!(Ptr::receipt_asset(&fb(1)), Some(token()));
+		System::assert_last_event(RuntimeEvent::Ptr(Event::ReceiptCreated {
+			asset: token(),
+			ptr_id: fb(1),
+			block_number: 1,
+			mask_bits: 0,
+		}));
+	});
+}
+
+#[test]
+fn disclose_names_the_pool_of_the_receipt() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(Ptr::record(fb(1), fb(2), 0, token()));
+
+		assert_ok!(disclose(fb(1), 0b0111));
+
+		System::assert_last_event(RuntimeEvent::Ptr(Event::Disclosed {
+			asset: Some(token()),
+			ptr_id: fb(1),
+			verifier: AUDITOR,
+			disclosure_mask: 0b0111,
+			sender: None,
+			receiver: None,
+			amount: None,
+		}));
+	});
+}
+
+/// Receipts recorded before the asset was tracked have no entry; their
+/// disclosure says so instead of guessing.
+#[test]
+fn disclose_of_a_receipt_without_a_recorded_asset_reports_none() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(Ptr::record(fb(1), fb(2), 0, token()));
+		ReceiptAsset::<Test>::remove(fb(1));
+
+		assert_ok!(disclose(fb(1), 0b0111));
+
+		System::assert_last_event(RuntimeEvent::Ptr(Event::Disclosed {
+			asset: None,
+			ptr_id: fb(1),
+			verifier: AUDITOR,
+			disclosure_mask: 0b0111,
+			sender: None,
+			receiver: None,
+			amount: None,
+		}));
 	});
 }

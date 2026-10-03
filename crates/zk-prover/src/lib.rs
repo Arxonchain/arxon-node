@@ -284,6 +284,7 @@ pub fn shield(req: ShieldReq) -> Result<ShieldRes, String> {
 			transparent_in: units,
 			transparent_out: 0,
 			fee: 0,
+			fee_recipient: None,
 			nullifiers: &[],
 			commitments: &[cm],
 			cv_inputs: &[],
@@ -300,6 +301,7 @@ pub fn shield(req: ShieldReq) -> Result<ShieldRes, String> {
 		expiry_block: req.expiry_block,
 		transparent_in: units,
 		transparent_out: 0,
+		fee: 0,
 	};
 	let c1 = output_witnesses(&[out], &ctx);
 	let c2 = balance_witness(&[], &[out], &ctx);
@@ -385,6 +387,7 @@ fn prove_spend_bundle(
 			transparent_in,
 			transparent_out,
 			fee: 0,
+			fee_recipient: None,
 			nullifiers: &nullifiers,
 			commitments: &commitments,
 			cv_inputs: &cv_inputs,
@@ -401,6 +404,7 @@ fn prove_spend_bundle(
 		expiry_block,
 		transparent_in,
 		transparent_out,
+		fee: 0,
 	};
 	let mut proofs = empty_proofs();
 	let spend_proof =

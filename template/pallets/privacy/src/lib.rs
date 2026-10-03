@@ -54,15 +54,21 @@ use scale_info::TypeInfo;
 
 /// Receives a receipt attachment from a private transfer (`pallet-ptr` implements it).
 pub trait ReceiptSink {
-	/// Records a receipt commitment for the payment output with value commitment `cv`.
-	fn record(ptr_id: FieldBytes, cv: FieldBytes, mask_bits: u8) -> DispatchResult;
+	/// Records a receipt commitment for the payment output with value commitment
+	/// `cv`, paid in `asset` (the pool the bundle ran in).
+	fn record(
+		ptr_id: FieldBytes,
+		cv: FieldBytes,
+		mask_bits: u8,
+		asset: PrivacyAsset,
+	) -> DispatchResult;
 
 	/// Weight of one [`Self::record`], for the bundle weight.
 	fn record_weight() -> frame_support::weights::Weight;
 }
 
 impl ReceiptSink for () {
-	fn record(_: FieldBytes, _: FieldBytes, _: u8) -> DispatchResult {
+	fn record(_: FieldBytes, _: FieldBytes, _: u8, _: PrivacyAsset) -> DispatchResult {
 		Ok(())
 	}
 
@@ -315,6 +321,30 @@ pub struct ComplianceAttachment {
 	pub registry_root: FieldBytes,
 }
 
+/// Fee a relayer earns for submitting a bundle, paid from the pool it spends.
+///
+/// The amount sits in Circuit 2's `fee` row and both fields are in the bundle
+/// digest, so the relayer cannot raise it and nobody can redirect it. Native
+/// ARX is paid by the pool account; an ARX-20 fee is minted to `recipient` by
+/// the token contract, like any other value leaving that token's pool.
+#[derive(
+	Clone,
+	Encode,
+	Decode,
+	DecodeWithMemTracking,
+	Eq,
+	PartialEq,
+	RuntimeDebug,
+	TypeInfo,
+	MaxEncodedLen
+)]
+pub struct RelayFee<AccountId, Balance> {
+	/// Base units; a multiple of the asset's shielded unit.
+	pub amount: Balance,
+	/// Who is paid, usually the relayer that submits the bundle.
+	pub recipient: AccountId,
+}
+
 /// Spent and created notes of a bundle.
 pub type Inputs = BoundedVec<Input, ConstU32<MAX_NOTES>>;
 /// Created notes of a bundle.
@@ -328,7 +358,7 @@ pub mod pallet {
 
 	use arxon_zk_primitives::{
 		arx20_bundle_digest, bundle_digest, encrypted_notes_hash,
-		mask::{hides_amount, hides_receiver, hides_sender, is_valid_mask},
+		mask::{hides_amount, hides_balance, hides_receiver, hides_sender, is_valid_mask},
 		poseidon::cv_dummy_bytes,
 		BundleFields, C1PublicInputs, C2PublicInputs, C3PublicInputs, C4PublicInputs,
 		C6PublicInputs, CircuitId, FieldBytes, InstanceRows, PublicInputLayout, PublicInputs,
@@ -339,6 +369,7 @@ pub mod pallet {
 		traits::{
 			fungible::{Inspect, Mutate},
 			tokens::Preservation,
+			Contains,
 		},
 		PalletId,
 	};
@@ -347,12 +378,19 @@ pub mod pallet {
 	use pallet_nullifier_registry::NullifierSet;
 	use pallet_zk_verifier::VerifyProof;
 	use sp_core::H160;
-	use sp_runtime::traits::{AccountIdConversion, Convert, SaturatedConversion, Zero};
+	use sp_runtime::traits::{AccountIdConversion, Convert, SaturatedConversion, Saturating, Zero};
 
 	use super::{
 		weights::WeightInfo, ComplianceAttachment, Inputs, Outputs, PrivacyAsset, PrivacyMask,
-		ProofBundle, PtrAttachment, ReceiptSink,
+		ProofBundle, PtrAttachment, ReceiptSink, RelayFee,
 	};
+
+	/// A relayer fee as the calls take it.
+	pub type RelayFeeOf<T> = RelayFee<<T as frame_system::Config>::AccountId, BalanceOf<T>>;
+
+	/// Largest token `decimals` accepted by [`Pallet::set_arx20_unit`]: the unit
+	/// `10^(decimals - 9)` must fit comfortably in the balance type.
+	pub const MAX_ARX20_DECIMALS: u8 = 36;
 
 	/// Balance type of the configured currency.
 	pub type BalanceOf<T> =
@@ -385,6 +423,10 @@ pub mod pallet {
 		/// Maps an ARX-20 contract to the account that must sign `*_arx20` calls.
 		/// On Arxon this is identity (`AccountId20`); it must match the EVM address mapping.
 		type TokenToAccount: Convert<H160, Self::AccountId>;
+		/// Addresses that may run an ARX-20 pool: contracts, never an externally
+		/// owned account or an EIP-7702 delegated account, whose key holder could
+		/// mint notes by signing the pool calls directly.
+		type Arx20Tokens: Contains<H160>;
 		/// Weights.
 		type WeightInfo: WeightInfo;
 	}
@@ -402,10 +444,23 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type ShieldedTxCount<T: Config> = StorageValue<_, u64, ValueQuery>;
 
-	/// Accounts that asked for their balance to be hidden by front ends.
+	/// Hide-balance flag each account last asked for. It takes effect
+	/// `MaxProofValidity` blocks after it changes ([`Pallet::is_balance_hidden`]).
 	#[pallet::storage]
 	pub type HideBalanceAccounts<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, bool, ValueQuery>;
+
+	/// Block at which an account last changed its hide-balance flag. Until
+	/// `MaxProofValidity` blocks have passed the previous value still applies, so
+	/// flipping the flag cannot invalidate a bundle a relayer is already submitting.
+	#[pallet::storage]
+	pub type HideBalanceChangedAt<T: Config> =
+		StorageMap<_, Blake2_128Concat, T::AccountId, BlockNumberFor<T>>;
+
+	/// Base units per shielded unit of an ARX-20 token, when it set one. Unset
+	/// tokens use the native `ShieldedUnit`.
+	#[pallet::storage]
+	pub type Arx20Unit<T: Config> = StorageMap<_, Blake2_128Concat, H160, BalanceOf<T>>;
 
 	/// Shielded public key registered by an account.
 	#[pallet::storage]
@@ -426,12 +481,14 @@ pub mod pallet {
 			/// The mask.
 			mask: PrivacyMask,
 		},
-		/// An account asked front ends to hide or show its balance.
+		/// An account turned hide-balance on or off.
 		BalanceVisibilitySet {
 			/// The account.
 			who: T::AccountId,
 			/// `true` = hidden.
 			hidden: bool,
+			/// First block at which the new value is enforced.
+			effective_from: BlockNumberFor<T>,
 		},
 		/// An account linked a shielded public key.
 		ShieldedKeyRegistered {
@@ -440,8 +497,10 @@ pub mod pallet {
 			/// The key.
 			pk: FieldBytes,
 		},
-		/// ARX entered the pool.
+		/// Value entered a pool.
 		Shielded {
+			/// Native ARX or the ARX-20 token.
+			asset: PrivacyAsset,
 			/// Depositor.
 			depositor: T::AccountId,
 			/// Amount in base units.
@@ -449,8 +508,10 @@ pub mod pallet {
 			/// Bundle digest.
 			bundle_digest: FieldBytes,
 		},
-		/// ARX left the pool.
+		/// Value left a pool.
 		Unshielded {
+			/// Native ARX or the ARX-20 token.
+			asset: PrivacyAsset,
 			/// Recipient.
 			recipient: T::AccountId,
 			/// Amount in base units.
@@ -460,6 +521,8 @@ pub mod pallet {
 		},
 		/// A bundle executed (any of the three operations).
 		BundleExecuted {
+			/// Native ARX or the ARX-20 token.
+			asset: PrivacyAsset,
 			/// Bundle digest (also the key of `TxPrivacyMask`).
 			bundle_digest: FieldBytes,
 			/// Mask.
@@ -469,6 +532,8 @@ pub mod pallet {
 		},
 		/// One output was proven to pay a trust registry member.
 		ComplianceAttested {
+			/// Native ARX or the ARX-20 token.
+			asset: PrivacyAsset,
 			/// Bundle digest.
 			bundle_digest: FieldBytes,
 			/// Output index.
@@ -478,6 +543,8 @@ pub mod pallet {
 		},
 		/// A note was spent.
 		NoteSpent {
+			/// Native ARX or the ARX-20 token (whose nullifier set it is).
+			asset: PrivacyAsset,
 			/// Bundle digest.
 			bundle_digest: FieldBytes,
 			/// Nullifier.
@@ -489,9 +556,11 @@ pub mod pallet {
 		},
 		/// A note was created.
 		NoteCreated {
+			/// Native ARX or the ARX-20 token (whose note tree it is).
+			asset: PrivacyAsset,
 			/// Bundle digest.
 			bundle_digest: FieldBytes,
-			/// Leaf index in the note tree.
+			/// Leaf index in that asset's note tree.
 			leaf_index: u64,
 			/// Commitment.
 			cm: FieldBytes,
@@ -503,6 +572,25 @@ pub mod pallet {
 			revealed_amount: Option<u64>,
 			/// Ciphertext for the receiver.
 			encrypted_note: super::EncryptedNote,
+		},
+		/// A relayer fee left the pool. For native ARX the pool paid it; for an
+		/// ARX-20 the token contract mints it to `recipient` after this call.
+		FeePaid {
+			/// Native ARX or the ARX-20 token.
+			asset: PrivacyAsset,
+			/// Who is paid.
+			recipient: T::AccountId,
+			/// Amount in base units.
+			amount: BalanceOf<T>,
+			/// Bundle digest.
+			bundle_digest: FieldBytes,
+		},
+		/// An ARX-20 token fixed its shielded unit.
+		Arx20UnitSet {
+			/// The token.
+			token: H160,
+			/// Base units per shielded unit.
+			unit: BalanceOf<T>,
 		},
 	}
 
@@ -552,6 +640,20 @@ pub mod pallet {
 		OnlyArx20Token,
 		/// Token address is zero.
 		ZeroTokenAddress,
+		/// A bundle marked hide-balance (mask bit 3) cannot unshield: its value stays notes.
+		HideBalanceForbidsUnshield,
+		/// The unshield recipient hides its balance: pool value cannot land in its public pocket.
+		RecipientHidesBalance,
+		/// The account spending (the signer, or the revealed sender) hides its balance.
+		SenderHidesBalance,
+		/// ARX-20 pools only run at contract addresses (not EOAs or EIP-7702 accounts).
+		NotATokenContract,
+		/// The token's shielded unit is already set.
+		Arx20UnitAlreadySet,
+		/// The token's pool already holds notes, so its unit can no longer change.
+		Arx20PoolNotEmpty,
+		/// `decimals` is above [`MAX_ARX20_DECIMALS`].
+		InvalidDecimals,
 	}
 
 	#[pallet::call]
@@ -568,13 +670,28 @@ pub mod pallet {
 
 		// Call index 1 was `record_tx_privacy`: removed, never reuse.
 
-		/// Asks front ends to hide or show the account balance.
+		/// Turns hide-balance on or off for the signer. While on, pool value
+		/// cannot be unshielded to the account nor spent by it (as signer or as
+		/// revealed sender) into a public pocket. The change is enforced only
+		/// `MaxProofValidity` blocks later, so it cannot invalidate a bundle that is
+		/// already being relayed.
 		#[pallet::call_index(2)]
 		#[pallet::weight(T::WeightInfo::set_balance_visibility())]
 		pub fn set_balance_visibility(origin: OriginFor<T>, hidden: bool) -> DispatchResult {
 			let who = ensure_signed(origin)?;
-			HideBalanceAccounts::<T>::insert(&who, hidden);
-			Self::deposit_event(Event::BalanceVisibilitySet { who, hidden });
+			let now = frame_system::Pallet::<T>::block_number();
+			if HideBalanceAccounts::<T>::get(&who) != hidden {
+				HideBalanceAccounts::<T>::insert(&who, hidden);
+				HideBalanceChangedAt::<T>::insert(&who, now);
+			}
+			let effective_from = HideBalanceChangedAt::<T>::get(&who)
+				.map(Self::visibility_effective_from)
+				.unwrap_or(now);
+			Self::deposit_event(Event::BalanceVisibilitySet {
+				who,
+				hidden,
+				effective_from,
+			});
 			Ok(())
 		}
 
@@ -620,6 +737,8 @@ pub mod pallet {
 				ptr: None,
 				compliance: None,
 				value: ValueFlow::Shield { depositor, amount },
+				fee: None,
+				signer: None,
 			};
 			Self::execute(intent)
 		}
@@ -638,7 +757,7 @@ pub mod pallet {
 			expiry_block: BlockNumberFor<T>,
 			proofs: ProofBundle,
 		) -> DispatchResult {
-			ensure_signed(origin)?;
+			let signer = ensure_signed(origin)?;
 			let intent = Intent {
 				asset: PrivacyAsset::Native,
 				anchor: Some(anchor),
@@ -650,6 +769,8 @@ pub mod pallet {
 				ptr: None,
 				compliance: None,
 				value: ValueFlow::Unshield { recipient, amount },
+				fee: None,
+				signer: Some(signer),
 			};
 			Self::execute(intent)
 		}
@@ -674,7 +795,7 @@ pub mod pallet {
 			compliance: Option<ComplianceAttachment>,
 			proofs: ProofBundle,
 		) -> DispatchResult {
-			ensure_signed(origin)?;
+			let signer = ensure_signed(origin)?;
 			let intent = Intent {
 				asset: PrivacyAsset::Native,
 				anchor: Some(anchor),
@@ -686,6 +807,8 @@ pub mod pallet {
 				ptr,
 				compliance,
 				value: ValueFlow::Transfer,
+				fee: None,
+				signer: Some(signer),
 			};
 			Self::execute(intent)
 		}
@@ -716,6 +839,8 @@ pub mod pallet {
 				ptr: None,
 				compliance: None,
 				value: ValueFlow::Shield { depositor, amount },
+				fee: None,
+				signer: None,
 			};
 			Self::execute(intent)
 		}
@@ -748,6 +873,8 @@ pub mod pallet {
 				ptr: None,
 				compliance: None,
 				value: ValueFlow::Unshield { recipient, amount },
+				fee: None,
+				signer: None,
 			};
 			Self::execute(intent)
 		}
@@ -784,8 +911,186 @@ pub mod pallet {
 				ptr,
 				compliance,
 				value: ValueFlow::Transfer,
+				fee: None,
+				signer: None,
 			};
 			Self::execute(intent)
+		}
+
+		/// [`Pallet::unshield`] submitted by a relayer that is paid `fee` from the pool.
+		#[pallet::call_index(10)]
+		#[pallet::weight(T::WeightInfo::unshield(inputs.len() as u32, outputs.len() as u32))]
+		pub fn unshield_with_fee(
+			origin: OriginFor<T>,
+			recipient: T::AccountId,
+			amount: BalanceOf<T>,
+			anchor: FieldBytes,
+			inputs: Inputs,
+			outputs: Outputs,
+			mask_bits: u8,
+			expiry_block: BlockNumberFor<T>,
+			fee: RelayFeeOf<T>,
+			proofs: ProofBundle,
+		) -> DispatchResult {
+			let signer = ensure_signed(origin)?;
+			Self::execute(Intent {
+				asset: PrivacyAsset::Native,
+				anchor: Some(anchor),
+				inputs,
+				outputs,
+				mask_bits,
+				expiry_block,
+				proofs,
+				ptr: None,
+				compliance: None,
+				value: ValueFlow::Unshield { recipient, amount },
+				fee: Some(fee),
+				signer: Some(signer),
+			})
+		}
+
+		/// [`Pallet::submit_private_transfer`] submitted by a relayer that is paid
+		/// `fee` from the pool. The sender needs no public balance at all.
+		#[pallet::call_index(11)]
+		#[pallet::weight(T::WeightInfo::submit_private_transfer(
+			inputs.len() as u32,
+			outputs.len() as u32,
+			ptr.is_some(),
+			compliance.is_some()
+		))]
+		pub fn submit_private_transfer_with_fee(
+			origin: OriginFor<T>,
+			anchor: FieldBytes,
+			inputs: Inputs,
+			outputs: Outputs,
+			mask_bits: u8,
+			expiry_block: BlockNumberFor<T>,
+			ptr: Option<PtrAttachment>,
+			compliance: Option<ComplianceAttachment>,
+			fee: RelayFeeOf<T>,
+			proofs: ProofBundle,
+		) -> DispatchResult {
+			let signer = ensure_signed(origin)?;
+			Self::execute(Intent {
+				asset: PrivacyAsset::Native,
+				anchor: Some(anchor),
+				inputs,
+				outputs,
+				mask_bits,
+				expiry_block,
+				proofs,
+				ptr,
+				compliance,
+				value: ValueFlow::Transfer,
+				fee: Some(fee),
+				signer: Some(signer),
+			})
+		}
+
+		/// [`Pallet::unshield_arx20`] with a relayer fee the token mints to its recipient.
+		#[pallet::call_index(12)]
+		#[pallet::weight(T::WeightInfo::unshield(inputs.len() as u32, outputs.len() as u32))]
+		pub fn unshield_arx20_with_fee(
+			origin: OriginFor<T>,
+			token: H160,
+			recipient: T::AccountId,
+			amount: BalanceOf<T>,
+			anchor: FieldBytes,
+			inputs: Inputs,
+			outputs: Outputs,
+			mask_bits: u8,
+			expiry_block: BlockNumberFor<T>,
+			fee: RelayFeeOf<T>,
+			proofs: ProofBundle,
+		) -> DispatchResult {
+			Self::ensure_arx20_token(origin, token)?;
+			Self::execute(Intent {
+				asset: PrivacyAsset::Arx20(token),
+				anchor: Some(anchor),
+				inputs,
+				outputs,
+				mask_bits,
+				expiry_block,
+				proofs,
+				ptr: None,
+				compliance: None,
+				value: ValueFlow::Unshield { recipient, amount },
+				fee: Some(fee),
+				signer: None,
+			})
+		}
+
+		/// [`Pallet::submit_private_transfer_arx20`] with a relayer fee the token
+		/// mints to its recipient.
+		#[pallet::call_index(13)]
+		#[pallet::weight(T::WeightInfo::submit_private_transfer(
+			inputs.len() as u32,
+			outputs.len() as u32,
+			ptr.is_some(),
+			compliance.is_some()
+		))]
+		pub fn submit_private_transfer_arx20_with_fee(
+			origin: OriginFor<T>,
+			token: H160,
+			anchor: FieldBytes,
+			inputs: Inputs,
+			outputs: Outputs,
+			mask_bits: u8,
+			expiry_block: BlockNumberFor<T>,
+			ptr: Option<PtrAttachment>,
+			compliance: Option<ComplianceAttachment>,
+			fee: RelayFeeOf<T>,
+			proofs: ProofBundle,
+		) -> DispatchResult {
+			Self::ensure_arx20_token(origin, token)?;
+			Self::execute(Intent {
+				asset: PrivacyAsset::Arx20(token),
+				anchor: Some(anchor),
+				inputs,
+				outputs,
+				mask_bits,
+				expiry_block,
+				proofs,
+				ptr,
+				compliance,
+				value: ValueFlow::Transfer,
+				fee: Some(fee),
+				signer: None,
+			})
+		}
+
+		/// Fixes the shielded unit of the signer's ARX-20 pool from its `decimals`:
+		/// `10^(decimals - 9)` base units, or 1 for tokens with 9 decimals or
+		/// fewer, so amounts up to about 1.8e10 tokens fit the circuits' `u64`.
+		/// Allowed once, and only while the pool is empty: notes already in it were
+		/// valued with the previous unit. The reference ARX-20 calls it from its
+		/// constructor (when its code is not stored yet), so this call does not
+		/// require contract code.
+		#[pallet::call_index(14)]
+		#[pallet::weight(T::WeightInfo::set_arx20_unit())]
+		pub fn set_arx20_unit(origin: OriginFor<T>, token: H160, decimals: u8) -> DispatchResult {
+			let who = ensure_signed(origin)?;
+			ensure!(!token.is_zero(), Error::<T>::ZeroTokenAddress);
+			ensure!(
+				who == T::TokenToAccount::convert(token),
+				Error::<T>::OnlyArx20Token
+			);
+			ensure!(decimals <= MAX_ARX20_DECIMALS, Error::<T>::InvalidDecimals);
+			ensure!(
+				!Arx20Unit::<T>::contains_key(token),
+				Error::<T>::Arx20UnitAlreadySet
+			);
+			ensure!(
+				T::Trees::leaf_count(TreeId::Arx20(token)) == 0,
+				Error::<T>::Arx20PoolNotEmpty
+			);
+			let unit: BalanceOf<T> = 10u128
+				.checked_pow(u32::from(decimals.saturating_sub(9)))
+				.ok_or(Error::<T>::InvalidDecimals)?
+				.saturated_into();
+			Arx20Unit::<T>::insert(token, unit);
+			Self::deposit_event(Event::Arx20UnitSet { token, unit });
+			Ok(())
 		}
 	}
 
@@ -831,12 +1136,18 @@ pub mod pallet {
 		pub compliance: Option<ComplianceAttachment>,
 		/// Transparent value flow.
 		pub value: ValueFlow<T>,
+		/// Relayer fee paid from the pool (unshield and private transfer only).
+		pub fee: Option<RelayFeeOf<T>>,
+		/// Account that signed a native extrinsic (`None` on the ARX-20 path,
+		/// where the signer is the token contract).
+		pub signer: Option<T::AccountId>,
 	}
 
 	/// Amounts already converted to shielded units.
 	pub struct Transparent {
 		into_pool: u64,
 		out_of_pool: u64,
+		fee: u64,
 	}
 
 	impl<T: Config> Pallet<T> {
@@ -887,13 +1198,86 @@ pub mod pallet {
 				who == T::TokenToAccount::convert(token),
 				Error::<T>::OnlyArx20Token
 			);
+			ensure!(
+				T::Arx20Tokens::contains(&token),
+				Error::<T>::NotATokenContract
+			);
 			Ok(who)
 		}
 
-		/// Converts a base-unit amount into shielded units.
-		fn to_units(amount: BalanceOf<T>) -> Result<u64, DispatchError> {
+		/// First block at which a hide-balance change made at `changed_at` applies.
+		fn visibility_effective_from(changed_at: BlockNumberFor<T>) -> BlockNumberFor<T> {
+			changed_at
+				.saturating_add(T::MaxProofValidity::get())
+				.saturating_add(1u32.into())
+		}
+
+		/// `true` iff hide-balance is in force for `who` at the current block: the
+		/// value it asked for, or the previous one while a change is still maturing.
+		pub fn is_balance_hidden(who: &T::AccountId) -> bool {
+			let requested = HideBalanceAccounts::<T>::get(who);
+			match HideBalanceChangedAt::<T>::get(who) {
+				Some(at)
+					if frame_system::Pallet::<T>::block_number()
+						< Self::visibility_effective_from(at) =>
+				{
+					!requested
+				}
+				_ => requested,
+			}
+		}
+
+		/// Base units per shielded unit of `asset`.
+		pub fn unit_of(asset: PrivacyAsset) -> BalanceOf<T> {
+			match asset {
+				PrivacyAsset::Native => T::ShieldedUnit::get(),
+				PrivacyAsset::Arx20(token) => {
+					Arx20Unit::<T>::get(token).unwrap_or_else(T::ShieldedUnit::get)
+				}
+			}
+		}
+
+		/// Hide-balance rules. The spender of a bundle is hidden, so a flag cannot
+		/// be tied to it cryptographically; what is enforced is every link the
+		/// chain can see: a bundle marked hide-balance never unshields, pool value
+		/// never lands in a flagged account, and a flagged account never unshields
+		/// as the signer or as a revealed sender (Circuit 3 forces a revealed sender
+		/// to be the note owner's key).
+		fn check_hide_balance(intent: &Intent<T>) -> DispatchResult {
+			let ValueFlow::Unshield { recipient, .. } = &intent.value else {
+				return Ok(());
+			};
+			ensure!(
+				!hides_balance(intent.mask_bits),
+				Error::<T>::HideBalanceForbidsUnshield
+			);
+			ensure!(
+				!Self::is_balance_hidden(recipient),
+				Error::<T>::RecipientHidesBalance
+			);
+			if let Some(signer) = &intent.signer {
+				ensure!(
+					!Self::is_balance_hidden(signer),
+					Error::<T>::SenderHidesBalance
+				);
+			}
+			if !hides_sender(intent.mask_bits) {
+				for input in intent.inputs.iter() {
+					if let Some(owner) = ShieldedKeyOwners::<T>::get(input.revealed_sender) {
+						ensure!(
+							!Self::is_balance_hidden(&owner),
+							Error::<T>::SenderHidesBalance
+						);
+					}
+				}
+			}
+			Ok(())
+		}
+
+		/// Converts a base-unit amount of `asset` into shielded units.
+		fn to_units(asset: PrivacyAsset, amount: BalanceOf<T>) -> Result<u64, DispatchError> {
 			ensure!(!amount.is_zero(), Error::<T>::ZeroAmount);
-			let unit = T::ShieldedUnit::get();
+			let unit = Self::unit_of(asset);
 			ensure!(!unit.is_zero(), Error::<T>::Overflow);
 			ensure!(
 				(amount % unit).is_zero(),
@@ -1036,18 +1420,30 @@ pub mod pallet {
 		}
 
 		fn transparent(intent: &Intent<T>) -> Result<Transparent, DispatchError> {
+			let asset = intent.asset;
+			let fee = match &intent.fee {
+				// A shield is signed by the depositor, who pays its own gas.
+				Some(_) if matches!(intent.value, ValueFlow::Shield { .. }) => {
+					return Err(Error::<T>::ProofBundleMismatch.into())
+				}
+				Some(fee) => Self::to_units(asset, fee.amount)?,
+				None => 0,
+			};
 			Ok(match &intent.value {
 				ValueFlow::Shield { amount, .. } => Transparent {
-					into_pool: Self::to_units(*amount)?,
+					into_pool: Self::to_units(asset, *amount)?,
 					out_of_pool: 0,
+					fee,
 				},
 				ValueFlow::Unshield { amount, .. } => Transparent {
 					into_pool: 0,
-					out_of_pool: Self::to_units(*amount)?,
+					out_of_pool: Self::to_units(asset, *amount)?,
+					fee,
 				},
 				ValueFlow::Transfer => Transparent {
 					into_pool: 0,
 					out_of_pool: 0,
+					fee,
 				},
 			})
 		}
@@ -1071,6 +1467,7 @@ pub mod pallet {
 				ValueFlow::Unshield { recipient, .. } => Some(recipient.encode()),
 				_ => None,
 			};
+			let fee_recipient = intent.fee.as_ref().map(|f| f.recipient.encode());
 			let nullifiers: Vec<FieldBytes> = intent.inputs.iter().map(|i| i.nullifier).collect();
 			let commitments: Vec<FieldBytes> = intent.outputs.iter().map(|o| o.cm).collect();
 			let cv_inputs: Vec<FieldBytes> = intent.inputs.iter().map(|i| i.cv).collect();
@@ -1086,7 +1483,8 @@ pub mod pallet {
 				recipient: recipient.as_deref(),
 				transparent_in: transparent.into_pool,
 				transparent_out: transparent.out_of_pool,
-				fee: 0,
+				fee: transparent.fee,
+				fee_recipient: fee_recipient.as_deref(),
 				nullifiers: &nullifiers,
 				commitments: &commitments,
 				cv_inputs: &cv_inputs,
@@ -1172,7 +1570,7 @@ pub mod pallet {
 				cv_out,
 				transparent.into_pool,
 				transparent.out_of_pool,
-				0,
+				transparent.fee,
 				digest,
 				expiry,
 			);
@@ -1223,14 +1621,23 @@ pub mod pallet {
 			Self::check_field_elements(&intent)?;
 			Self::check_shape(&intent)?;
 			Self::check_notes(&intent)?;
+			Self::check_hide_balance(&intent)?;
 			let transparent = Self::transparent(&intent)?;
 			if intent.asset.is_native() {
-				if let ValueFlow::Unshield { amount, .. } = &intent.value {
-					ensure!(
-						Self::pool_balance() >= *amount,
-						Error::<T>::PoolInsufficient
-					);
-				}
+				let out = match &intent.value {
+					ValueFlow::Unshield { amount, .. } => *amount,
+					_ => Zero::zero(),
+				};
+				let fee = intent
+					.fee
+					.as_ref()
+					.map(|f| f.amount)
+					.unwrap_or_else(Zero::zero);
+				let leaving = out.checked_add(&fee).ok_or(Error::<T>::Overflow)?;
+				ensure!(
+					Self::pool_balance() >= leaving,
+					Error::<T>::PoolInsufficient
+				);
 			}
 			let digest = Self::digest_of(&intent, &transparent);
 			ensure!(
@@ -1249,6 +1656,7 @@ pub mod pallet {
 					(!hides_sender(intent.mask_bits)).then_some(input.revealed_sender);
 				let sender_account = revealed_sender.and_then(ShieldedKeyOwners::<T>::get);
 				Self::deposit_event(Event::NoteSpent {
+					asset: intent.asset,
 					bundle_digest: digest,
 					nullifier: input.nullifier,
 					revealed_sender,
@@ -1263,6 +1671,7 @@ pub mod pallet {
 				let revealed_amount = (!hides_amount(intent.mask_bits))
 					.then(|| Self::field_to_u64(&output.revealed_amount));
 				Self::deposit_event(Event::NoteCreated {
+					asset: intent.asset,
 					bundle_digest: digest,
 					leaf_index,
 					cm: output.cm,
@@ -1283,6 +1692,7 @@ pub mod pallet {
 						)?;
 					}
 					Self::deposit_event(Event::Shielded {
+						asset: intent.asset,
 						depositor: depositor.clone(),
 						amount: *amount,
 						bundle_digest: digest,
@@ -1298,6 +1708,7 @@ pub mod pallet {
 						)?;
 					}
 					Self::deposit_event(Event::Unshielded {
+						asset: intent.asset,
 						recipient: recipient.clone(),
 						amount: *amount,
 						bundle_digest: digest,
@@ -1305,12 +1716,29 @@ pub mod pallet {
 				}
 				ValueFlow::Transfer => {}
 			}
+			if let Some(fee) = &intent.fee {
+				if intent.asset.is_native() {
+					T::Currency::transfer(
+						&Self::pool_account(),
+						&fee.recipient,
+						fee.amount,
+						Preservation::Expendable,
+					)?;
+				}
+				Self::deposit_event(Event::FeePaid {
+					asset: intent.asset,
+					recipient: fee.recipient.clone(),
+					amount: fee.amount,
+					bundle_digest: digest,
+				});
+			}
 			if let Some(ptr) = &intent.ptr {
 				let payment = &intent.outputs[ptr.payment_output_index as usize];
-				T::Receipts::record(ptr.ptr_id, payment.cv, intent.mask_bits)?;
+				T::Receipts::record(ptr.ptr_id, payment.cv, intent.mask_bits, intent.asset)?;
 			}
 			if let Some(c) = &intent.compliance {
 				Self::deposit_event(Event::ComplianceAttested {
+					asset: intent.asset,
 					bundle_digest: digest,
 					output_index: c.output_index,
 					membership_root: c.registry_root,
@@ -1324,6 +1752,7 @@ pub mod pallet {
 			}
 			TxPrivacyMask::<T>::insert(digest, mask);
 			Self::deposit_event(Event::BundleExecuted {
+				asset: intent.asset,
 				bundle_digest: digest,
 				mask,
 				expiry_block: intent.expiry_block,

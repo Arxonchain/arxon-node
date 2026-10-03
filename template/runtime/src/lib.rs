@@ -198,7 +198,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: Cow::Borrowed("arxon"),
 	impl_name: Cow::Borrowed("arxon"),
 	authoring_version: 1,
-	spec_version: 6,
+	spec_version: 7,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 2,
@@ -1129,6 +1129,14 @@ impl_runtime_apis! {
 			};
 			Some(NoteTree::leaves(tree, start, count).into_iter().map(|leaf| leaf.0).collect())
 		}
+
+		fn balance_hidden(account: [u8; 20]) -> bool {
+			Privacy::is_balance_hidden(&AccountId::from(H160(account)))
+		}
+
+		fn arx20_shielded_unit(token: [u8; 20]) -> u128 {
+			Privacy::unit_of(pallet_privacy::PrivacyAsset::Arx20(H160(token)))
+		}
 	}
 
 	#[cfg(feature = "runtime-benchmarks")]
@@ -1214,6 +1222,52 @@ mod tests {
 		);
 	}
 
+	mod arx20_contracts {
+		use frame_support::traits::Contains;
+		use sp_core::H160;
+
+		use super::super::{Arx20Contracts, Runtime};
+
+		fn with_code(code: Option<Vec<u8>>) -> bool {
+			sp_io::TestExternalities::default().execute_with(|| {
+				let token = H160::repeat_byte(0x20);
+				if let Some(code) = code {
+					pallet_evm::Pallet::<Runtime>::create_account(token, code, None)
+						.expect("code stored");
+				}
+				Arx20Contracts::contains(&token)
+			})
+		}
+
+		fn delegation_to(target: u8) -> Vec<u8> {
+			let mut code = vec![0xef, 0x01, 0x00];
+			code.extend_from_slice(&[target; 20]);
+			code
+		}
+
+		#[test]
+		fn an_account_without_code_is_not_a_token_contract() {
+			assert!(!with_code(None));
+		}
+
+		#[test]
+		fn deployed_code_is_a_token_contract() {
+			assert!(with_code(Some(vec![0x60, 0x00, 0x60, 0x00, 0xf3])));
+		}
+
+		#[test]
+		fn an_eip_7702_delegation_is_not_a_token_contract() {
+			assert!(!with_code(Some(delegation_to(0x77))));
+		}
+
+		#[test]
+		fn other_code_of_the_delegation_length_is_a_token_contract() {
+			let mut code = vec![0x60; 23];
+			code[22] = 0xf3;
+			assert!(with_code(Some(code)));
+		}
+	}
+
 	#[test]
 	fn shielded_pool_account_is_frozen() {
 		assert_eq!(
@@ -1252,7 +1306,31 @@ impl pallet_privacy::Config for Runtime {
 	type Trees = NoteTree;
 	type Receipts = PTR;
 	type TokenToAccount = pallet_privacy::FromH160;
+	type Arx20Tokens = Arx20Contracts;
 	type WeightInfo = pallet_privacy::weights::SubstrateWeight<Runtime>;
+}
+
+/// Accounts that may run an ARX-20 pool: deployed contracts. An address
+/// without code is an EOA (or a contract still in its constructor), and a
+/// 23-byte code starting `0xef0100` is an EIP-7702 delegation, an EOA that
+/// can still sign on its own. No contract code starts with `0xef` (EIP-3541),
+/// so the prefix alone tells a delegation apart.
+pub struct Arx20Contracts;
+
+/// EIP-7702 delegation designator: `0xef0100 || address`.
+const EIP7702_PREFIX: [u8; 3] = [0xef, 0x01, 0x00];
+const EIP7702_DESIGNATOR_LEN: u64 = 23;
+
+impl frame_support::traits::Contains<H160> for Arx20Contracts {
+	fn contains(token: &H160) -> bool {
+		match pallet_evm::Pallet::<Runtime>::account_code_metadata(*token).size {
+			0 => false,
+			EIP7702_DESIGNATOR_LEN => {
+				!pallet_evm::AccountCodes::<Runtime>::get(token).starts_with(&EIP7702_PREFIX)
+			}
+			_ => true,
+		}
+	}
 }
 
 impl pallet_arx_claim::Config for Runtime {

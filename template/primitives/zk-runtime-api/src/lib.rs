@@ -12,8 +12,9 @@ extern crate alloc;
 sp_api::decl_runtime_apis! {
 	/// Read-only view of the shielded pool.
 	///
-	/// Version 2 adds [`ArxonZkApi::leaves`].
-	#[api_version(2)]
+	/// Version 2 adds [`ArxonZkApi::leaves`]. Version 3 adds
+	/// [`ArxonZkApi::balance_hidden`] and [`ArxonZkApi::arx20_shielded_unit`].
+	#[api_version(3)]
 	pub trait ArxonZkApi {
 		/// Current root of the note commitment tree.
 		fn note_tree_root() -> [u8; 32];
@@ -29,8 +30,15 @@ sp_api::decl_runtime_apis! {
 		fn circuit_enabled(circuit_id: u8) -> bool;
 		/// Up to `count` leaves of tree `tree` from index `start`, in insertion
 		/// order, capped at 1024 and at the last leaf; `None` for an unknown tree id.
-		/// Wallets sync a tree page by page instead of leaf by leaf.
-		#[api_version(2)]
+		/// Wallets sync a tree page by page instead of leaf by leaf. Since version 2.
 		fn leaves(tree: u8, start: u64, count: u32) -> Option<alloc::vec::Vec<[u8; 32]>>;
+		/// `true` iff hide-balance is in force for the EVM `account` now: pool
+		/// value is never unshielded to it and it never signs an unshield. A
+		/// change takes `MaxProofValidity + 1` blocks; until then this reports
+		/// the previous value. Since version 3.
+		fn balance_hidden(account: [u8; 20]) -> bool;
+		/// Base units of ARX-20 `token` per shielded unit: amounts and fees of
+		/// its pool are multiples of it. Since version 3.
+		fn arx20_shielded_unit(token: [u8; 20]) -> u128;
 	}
 }

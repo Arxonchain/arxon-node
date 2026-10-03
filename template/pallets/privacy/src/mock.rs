@@ -124,19 +124,23 @@ parameter_types! {
 pub const UNIT: Balance = 1_000_000_000;
 pub const MAX_VALIDITY: u64 = 128;
 
+/// A recorded receipt: `(ptr_id, cv, mask_bits, asset)`.
+pub type RecordedReceipt = (
+	arxon_zk_primitives::FieldBytes,
+	arxon_zk_primitives::FieldBytes,
+	u8,
+	pallet_privacy::PrivacyAsset,
+);
+
 thread_local! {
-	static RECEIPTS: RefCell<Vec<(arxon_zk_primitives::FieldBytes, arxon_zk_primitives::FieldBytes, u8)>> = const { RefCell::new(Vec::new()) };
+	static RECEIPTS: RefCell<Vec<RecordedReceipt>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Records every receipt handed over by the privacy pallet.
 pub struct RecordingSink;
 
 impl RecordingSink {
-	pub fn recorded() -> Vec<(
-		arxon_zk_primitives::FieldBytes,
-		arxon_zk_primitives::FieldBytes,
-		u8,
-	)> {
+	pub fn recorded() -> Vec<RecordedReceipt> {
 		RECEIPTS.with(|r| r.borrow().clone())
 	}
 
@@ -150,8 +154,9 @@ impl ReceiptSink for RecordingSink {
 		ptr_id: arxon_zk_primitives::FieldBytes,
 		cv: arxon_zk_primitives::FieldBytes,
 		mask_bits: u8,
+		asset: pallet_privacy::PrivacyAsset,
 	) -> frame_support::dispatch::DispatchResult {
-		RECEIPTS.with(|r| r.borrow_mut().push((ptr_id, cv, mask_bits)));
+		RECEIPTS.with(|r| r.borrow_mut().push((ptr_id, cv, mask_bits, asset)));
 		Ok(())
 	}
 
@@ -170,7 +175,18 @@ impl pallet_privacy::Config for Test {
 	type Trees = NoteTree;
 	type Receipts = RecordingSink;
 	type TokenToAccount = TokenToU64;
+	type Arx20Tokens = ContractTokens;
 	type WeightInfo = ();
+}
+
+/// Every address is a token contract except [`EOA_TOKEN`], which stands for an
+/// externally owned (or EIP-7702 delegated) account.
+pub struct ContractTokens;
+
+impl frame_support::traits::Contains<H160> for ContractTokens {
+	fn contains(token: &H160) -> bool {
+		*token != H160::from_low_u64_be(EOA_TOKEN)
+	}
 }
 
 /// Last 8 bytes of the token address (tests use `H160::from_low_u64_be`).
@@ -188,6 +204,8 @@ pub const ALICE: AccountId = 1;
 pub const BOB: AccountId = 2;
 pub const RELAYER: AccountId = 3;
 pub const TOKEN: AccountId = 99;
+/// An account that signs as if it were a token but has no contract code.
+pub const EOA_TOKEN: AccountId = 98;
 pub const ALICE_BALANCE: Balance = 1_000 * UNIT;
 
 pub fn arx20_token() -> H160 {

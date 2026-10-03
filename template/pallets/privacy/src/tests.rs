@@ -454,12 +454,18 @@ fn shield_emits_note_created_with_ciphertext_and_resolved_receiver() {
 		assert_ok!(shield(42 * UNIT, outputs(vec![output(1, 2)]), 0));
 
 		let created = System::events().into_iter().find_map(|r| match r.event {
-			RuntimeEvent::Privacy(e @ Event::NoteCreated { .. }) => Some(e),
+			RuntimeEvent::Privacy(
+				e @ Event::NoteCreated {
+					asset: crate::PrivacyAsset::Native,
+					..
+				},
+			) => Some(e),
 			_ => None,
 		});
 		assert_eq!(
 			created,
 			Some(Event::NoteCreated {
+				asset: crate::PrivacyAsset::Native,
 				bundle_digest: last_digest(),
 				leaf_index: 0,
 				cm: fb(1),
@@ -851,12 +857,18 @@ fn private_transfer_emits_note_spent_with_resolved_sender_when_revealed() {
 		));
 
 		let spent = System::events().into_iter().find_map(|r| match r.event {
-			RuntimeEvent::Privacy(e @ Event::NoteSpent { .. }) => Some(e),
+			RuntimeEvent::Privacy(
+				e @ Event::NoteSpent {
+					asset: crate::PrivacyAsset::Native,
+					..
+				},
+			) => Some(e),
 			_ => None,
 		});
 		assert_eq!(
 			spent,
 			Some(Event::NoteSpent {
+				asset: crate::PrivacyAsset::Native,
 				bundle_digest: last_digest(),
 				nullifier: fb(10),
 				revealed_sender: Some(fb(0xa0)),
@@ -880,6 +892,7 @@ fn private_transfer_hides_sender_in_event_when_mask_says_so() {
 
 		let spent = System::events().into_iter().find_map(|r| match r.event {
 			RuntimeEvent::Privacy(Event::NoteSpent {
+				asset: crate::PrivacyAsset::Native,
 				revealed_sender,
 				sender_account,
 				..
@@ -969,6 +982,8 @@ fn unshield_binds_recipient_and_transparent_out_into_the_digest() {
 				recipient: BOB,
 				amount: 42 * UNIT,
 			},
+			fee: None,
+			signer: None,
 		};
 		let to_alice = Intent::<Test> {
 			value: ValueFlow::Unshield {
@@ -1010,6 +1025,8 @@ fn to_bob_clone(i: &Intent<Test>) -> Intent<Test> {
 		ptr: None,
 		compliance: None,
 		value: ValueFlow::Transfer,
+		fee: None,
+		signer: None,
 	}
 }
 
@@ -1198,7 +1215,10 @@ fn private_transfer_with_receipt_records_it_in_the_sink() {
 			full_bundle(true, false)
 		));
 
-		assert_eq!(RecordingSink::recorded(), vec![(fb(0x50), fb(21), 0)]);
+		assert_eq!(
+			RecordingSink::recorded(),
+			vec![(fb(0x50), fb(21), 0, crate::PrivacyAsset::Native)]
+		);
 	});
 }
 
@@ -1278,6 +1298,7 @@ fn private_transfer_with_compliance_verifies_circuit_6_against_the_membership_ro
 		assert_eq!(c6.public_inputs[0][0], root, "membership root");
 		assert_eq!(c6.public_inputs[0][1], fb(20), "cm of output 0");
 		System::assert_has_event(RuntimeEvent::Privacy(Event::ComplianceAttested {
+			asset: crate::PrivacyAsset::Native,
 			bundle_digest: last_digest(),
 			output_index: 0,
 			membership_root: root,
@@ -1591,6 +1612,8 @@ fn arx20_digest_differs_from_native_for_the_same_notes() {
 				depositor: TOKEN,
 				amount: 42 * UNIT,
 			},
+			fee: None,
+			signer: None,
 		};
 		let token = crate::pallet::Intent::<Test> {
 			asset: PrivacyAsset::Arx20(arx20_token()),
@@ -1606,9 +1629,535 @@ fn arx20_digest_differs_from_native_for_the_same_notes() {
 				depositor: TOKEN,
 				amount: 42 * UNIT,
 			},
+			fee: None,
+			signer: None,
 		};
 		let n = Privacy::digest_of(&native, &Privacy::transparent_for_tests(&native));
 		let t = Privacy::digest_of(&token, &Privacy::transparent_for_tests(&token));
 		assert_ne!(n, t);
+	});
+}
+
+// --- relayer fee paid from the pool ---------------------------------------------------------------
+
+use crate::{mock::MAX_VALIDITY, HideBalanceAccounts, RelayFee};
+
+fn relay_fee(units: u128) -> RelayFee<u64, u128> {
+	RelayFee {
+		amount: units * UNIT,
+		recipient: RELAYER,
+	}
+}
+
+/// Public rows of the last verified Circuit 2 instance.
+fn c2_rows() -> Vec<FieldBytes> {
+	FakeVerifier::calls()
+		.into_iter()
+		.find(|c| c.circuit_id == CircuitId::BalanceIntegrity)
+		.expect("C2 verified")
+		.public_inputs[0]
+		.to_vec()
+}
+
+const C2_FEE_ROW: usize = 6;
+
+fn transfer_with_fee(anchor: FieldBytes, fee: RelayFee<u64, u128>) -> Result<(), DispatchError> {
+	Privacy::submit_private_transfer_with_fee(
+		RuntimeOrigin::signed(RELAYER),
+		anchor,
+		inputs(vec![input(10, 11)]),
+		outputs(vec![output(20, 21)]),
+		0,
+		EXPIRY,
+		None,
+		None,
+		fee,
+		bundle(true, true),
+	)
+}
+
+fn unshield_with_fee(
+	recipient: u64,
+	amount: u128,
+	anchor: FieldBytes,
+	fee: RelayFee<u64, u128>,
+) -> Result<(), DispatchError> {
+	Privacy::unshield_with_fee(
+		RuntimeOrigin::signed(RELAYER),
+		recipient,
+		amount,
+		anchor,
+		inputs(vec![input(10, 11)]),
+		outputs(vec![]),
+		0,
+		EXPIRY,
+		fee,
+		bundle(true, false),
+	)
+}
+
+#[test]
+fn a_relayed_private_transfer_pays_the_relayer_from_the_pool() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		let relayer_before = Balances::balance(&RELAYER);
+		let pool_before = Privacy::pool_balance();
+		FakeVerifier::reset();
+
+		assert_ok!(transfer_with_fee(anchor, relay_fee(2)));
+
+		assert_eq!(Balances::balance(&RELAYER), relayer_before + 2 * UNIT);
+		assert_eq!(Privacy::pool_balance(), pool_before - 2 * UNIT);
+		assert_eq!(c2_rows()[C2_FEE_ROW], FieldBytes::from_u64(2));
+		System::assert_has_event(RuntimeEvent::Privacy(Event::FeePaid {
+			asset: PrivacyAsset::Native,
+			recipient: RELAYER,
+			amount: 2 * UNIT,
+			bundle_digest: last_digest(),
+		}));
+	});
+}
+
+#[test]
+fn a_relayed_unshield_pays_the_recipient_and_the_relayer() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		let relayer_before = Balances::balance(&RELAYER);
+
+		assert_ok!(unshield_with_fee(BOB, 40 * UNIT, anchor, relay_fee(2)));
+
+		assert_eq!(Balances::balance(&BOB), 40 * UNIT);
+		assert_eq!(Balances::balance(&RELAYER), relayer_before + 2 * UNIT);
+		assert_eq!(Privacy::pool_balance(), 0);
+	});
+}
+
+#[test]
+fn a_relayed_unshield_fails_when_the_pool_cannot_cover_amount_and_fee() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+
+		assert_noop!(
+			unshield_with_fee(BOB, 41 * UNIT, anchor, relay_fee(2)),
+			Error::<Test>::PoolInsufficient
+		);
+	});
+}
+
+#[test]
+fn a_fee_must_be_a_positive_multiple_of_the_unit() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		let odd = RelayFee {
+			amount: UNIT + 1,
+			recipient: RELAYER,
+		};
+		let zero = RelayFee {
+			amount: 0,
+			recipient: RELAYER,
+		};
+
+		assert_noop!(
+			transfer_with_fee(anchor, odd),
+			Error::<Test>::AmountNotMultipleOfUnit
+		);
+		assert_noop!(transfer_with_fee(anchor, zero), Error::<Test>::ZeroAmount);
+	});
+}
+
+#[test]
+fn the_fee_and_its_recipient_are_bound_into_the_digest() {
+	let digest_with = |recipient: u64, units: u128| {
+		let mut digest = FieldBytes::ZERO;
+		new_test_ext().execute_with(|| {
+			let anchor = shielded_note(1, 2);
+			FakeVerifier::reset();
+			assert_ok!(transfer_with_fee(
+				anchor,
+				RelayFee {
+					amount: units * UNIT,
+					recipient
+				}
+			));
+			digest = verified_digest();
+		});
+		digest
+	};
+
+	assert_ne!(digest_with(RELAYER, 2), digest_with(BOB, 2));
+	assert_ne!(digest_with(RELAYER, 2), digest_with(RELAYER, 3));
+}
+
+#[test]
+fn a_fee_free_bundle_keeps_a_zero_fee_row() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		FakeVerifier::reset();
+
+		assert_ok!(transfer(
+			anchor,
+			inputs(vec![input(10, 11)]),
+			outputs(vec![output(20, 21)]),
+			0
+		));
+
+		assert_eq!(c2_rows()[C2_FEE_ROW], FieldBytes::ZERO);
+	});
+}
+
+// --- hide-balance ---------------------------------------------------------------------------------
+
+/// A flag set long ago (no pending change): in force at once.
+fn flag(who: u64) {
+	HideBalanceAccounts::<Test>::insert(who, true);
+}
+
+fn unshield_masked(
+	signer: u64,
+	recipient: u64,
+	anchor: FieldBytes,
+	mask: u8,
+) -> Result<(), DispatchError> {
+	Privacy::unshield(
+		RuntimeOrigin::signed(signer),
+		recipient,
+		40 * UNIT,
+		anchor,
+		inputs(vec![input(10, 11)]),
+		outputs(vec![output(30, 31)]),
+		mask,
+		EXPIRY,
+		bundle(true, true),
+	)
+}
+
+#[test]
+fn turning_hide_balance_on_takes_effect_after_the_proof_validity_window() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(Privacy::set_balance_visibility(
+			RuntimeOrigin::signed(ALICE),
+			true
+		));
+		let effective_from = 1 + MAX_VALIDITY + 1;
+
+		System::assert_last_event(RuntimeEvent::Privacy(Event::BalanceVisibilitySet {
+			who: ALICE,
+			hidden: true,
+			effective_from,
+		}));
+		assert!(!Privacy::is_balance_hidden(&ALICE));
+		System::set_block_number(effective_from - 1);
+		assert!(!Privacy::is_balance_hidden(&ALICE));
+		System::set_block_number(effective_from);
+		assert!(Privacy::is_balance_hidden(&ALICE));
+	});
+}
+
+#[test]
+fn turning_hide_balance_off_also_waits_for_the_window() {
+	new_test_ext().execute_with(|| {
+		flag(ALICE);
+		System::set_block_number(10);
+
+		assert_ok!(Privacy::set_balance_visibility(
+			RuntimeOrigin::signed(ALICE),
+			false
+		));
+
+		assert!(Privacy::is_balance_hidden(&ALICE));
+		System::set_block_number(10 + MAX_VALIDITY + 1);
+		assert!(!Privacy::is_balance_hidden(&ALICE));
+	});
+}
+
+#[test]
+fn repeating_the_current_flag_does_not_restart_the_window() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(Privacy::set_balance_visibility(
+			RuntimeOrigin::signed(ALICE),
+			true
+		));
+		System::set_block_number(1 + MAX_VALIDITY + 1);
+		assert!(Privacy::is_balance_hidden(&ALICE));
+
+		assert_ok!(Privacy::set_balance_visibility(
+			RuntimeOrigin::signed(ALICE),
+			true
+		));
+
+		assert!(Privacy::is_balance_hidden(&ALICE));
+	});
+}
+
+#[test]
+fn a_bundle_marked_hide_balance_cannot_unshield() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+
+		assert_noop!(
+			unshield_masked(RELAYER, BOB, anchor, 0b1000),
+			Error::<Test>::HideBalanceForbidsUnshield
+		);
+	});
+}
+
+#[test]
+fn a_bundle_marked_hide_balance_can_still_pay_privately() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+
+		assert_ok!(transfer(
+			anchor,
+			inputs(vec![input(10, 11)]),
+			outputs(vec![output(20, 21)]),
+			0b1000
+		));
+	});
+}
+
+#[test]
+fn pool_value_cannot_be_unshielded_to_an_account_that_hides_its_balance() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		flag(BOB);
+
+		assert_noop!(
+			unshield_masked(RELAYER, BOB, anchor, 0),
+			Error::<Test>::RecipientHidesBalance
+		);
+	});
+}
+
+/// A recipient that turns the flag on while a relayer is submitting its unshield
+/// cannot make the relayer pay for a rejected bundle.
+#[test]
+fn a_flag_still_maturing_does_not_reject_an_unshield_in_flight() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		assert_ok!(Privacy::set_balance_visibility(
+			RuntimeOrigin::signed(BOB),
+			true
+		));
+
+		assert_ok!(unshield_masked(RELAYER, BOB, anchor, 0));
+	});
+}
+
+#[test]
+fn an_account_that_hides_its_balance_cannot_sign_an_unshield() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		flag(ALICE);
+
+		assert_noop!(
+			unshield_masked(ALICE, BOB, anchor, 0),
+			Error::<Test>::SenderHidesBalance
+		);
+	});
+}
+
+/// Circuit 3 forces a revealed sender to be the spent note's owner, so a
+/// revealed sender registered to a flagged account is that account spending.
+#[test]
+fn a_revealed_sender_that_hides_its_balance_cannot_unshield() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		assert_ok!(Privacy::register_shielded_key(
+			RuntimeOrigin::signed(ALICE),
+			fb(0xa0)
+		));
+		flag(ALICE);
+
+		assert_noop!(
+			unshield_masked(RELAYER, BOB, anchor, 0),
+			Error::<Test>::SenderHidesBalance
+		);
+	});
+}
+
+/// The documented limit: with the sender hidden the chain cannot tell whose
+/// notes are spent, so only the owner's wallet (which sets bit 3) applies the rule.
+#[test]
+fn a_hidden_sender_is_not_checked_against_the_flag() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		assert_ok!(Privacy::register_shielded_key(
+			RuntimeOrigin::signed(ALICE),
+			fb(0xa0)
+		));
+		flag(ALICE);
+
+		assert_ok!(unshield_masked(RELAYER, BOB, anchor, 0b0001));
+	});
+}
+
+// --- ARX-20: contracts only, per-token unit, asset everywhere -------------------------------------
+
+use crate::{mock::EOA_TOKEN, Arx20Unit};
+
+fn eoa_token() -> sp_core::H160 {
+	sp_core::H160::from_low_u64_be(EOA_TOKEN)
+}
+
+#[test]
+fn an_account_without_contract_code_cannot_run_an_arx20_pool() {
+	new_test_ext().execute_with(|| {
+		assert_noop!(
+			Privacy::shield_arx20(
+				RuntimeOrigin::signed(EOA_TOKEN),
+				eoa_token(),
+				42 * UNIT,
+				outputs(vec![output(1, 2)]),
+				0,
+				EXPIRY,
+				bundle(false, true),
+			),
+			Error::<Test>::NotATokenContract
+		);
+	});
+}
+
+#[test]
+fn arx20_events_and_receipts_name_the_token() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(shield_arx20(42 * UNIT, outputs(vec![output(1, 2)]), 0));
+
+		System::assert_has_event(RuntimeEvent::Privacy(Event::Shielded {
+			asset: PrivacyAsset::Arx20(arx20_token()),
+			depositor: TOKEN,
+			amount: 42 * UNIT,
+			bundle_digest: last_digest(),
+		}));
+		let anchor = NoteTree::current_root(TreeId::Arx20(arx20_token()));
+		assert_ok!(Privacy::submit_private_transfer_arx20(
+			RuntimeOrigin::signed(TOKEN),
+			arx20_token(),
+			anchor,
+			inputs(vec![input(10, 11)]),
+			outputs(vec![output(20, 21)]),
+			0,
+			EXPIRY,
+			Some(PtrAttachment {
+				payment_output_index: 0,
+				ptr_id: fb(0x50)
+			}),
+			None,
+			full_bundle(true, false),
+		));
+		assert_eq!(
+			RecordingSink::recorded(),
+			vec![(fb(0x50), fb(21), 0, PrivacyAsset::Arx20(arx20_token()))]
+		);
+	});
+}
+
+#[test]
+fn a_relayed_arx20_transfer_moves_no_native_arx_and_reports_the_token_fee() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(shield_arx20(42 * UNIT, outputs(vec![output(1, 2)]), 0));
+		let anchor = NoteTree::current_root(TreeId::Arx20(arx20_token()));
+		let relayer_before = Balances::balance(&RELAYER);
+
+		assert_ok!(Privacy::submit_private_transfer_arx20_with_fee(
+			RuntimeOrigin::signed(TOKEN),
+			arx20_token(),
+			anchor,
+			inputs(vec![input(10, 11)]),
+			outputs(vec![output(20, 21)]),
+			0,
+			EXPIRY,
+			None,
+			None,
+			relay_fee(2),
+			bundle(true, true),
+		));
+
+		assert_eq!(Balances::balance(&RELAYER), relayer_before);
+		System::assert_has_event(RuntimeEvent::Privacy(Event::FeePaid {
+			asset: PrivacyAsset::Arx20(arx20_token()),
+			recipient: RELAYER,
+			amount: 2 * UNIT,
+			bundle_digest: last_digest(),
+		}));
+	});
+}
+
+fn set_unit(decimals: u8) -> Result<(), DispatchError> {
+	Privacy::set_arx20_unit(RuntimeOrigin::signed(TOKEN), arx20_token(), decimals)
+}
+
+#[test]
+fn a_token_unit_follows_its_decimals() {
+	for (decimals, unit) in [
+		(6u8, 1u128),
+		(9, 1),
+		(18, 1_000_000_000),
+		(24, 10u128.pow(15)),
+	] {
+		new_test_ext().execute_with(|| {
+			assert_ok!(set_unit(decimals));
+
+			assert_eq!(Arx20Unit::<Test>::get(arx20_token()), Some(unit));
+			System::assert_last_event(RuntimeEvent::Privacy(Event::Arx20UnitSet {
+				token: arx20_token(),
+				unit,
+			}));
+		});
+	}
+}
+
+#[test]
+fn a_six_decimal_token_shields_amounts_below_the_native_unit() {
+	new_test_ext().execute_with(|| {
+		assert_noop!(
+			shield_arx20(5, outputs(vec![output(1, 2)]), 0),
+			Error::<Test>::AmountNotMultipleOfUnit
+		);
+		assert_ok!(set_unit(6));
+		FakeVerifier::reset();
+
+		assert_ok!(shield_arx20(5, outputs(vec![output(1, 2)]), 0));
+
+		assert_eq!(
+			c2_rows()[4],
+			FieldBytes::from_u64(5),
+			"transparent_in in token units"
+		);
+	});
+}
+
+#[test]
+fn a_token_unit_is_set_once_and_only_while_the_pool_is_empty() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(set_unit(18));
+		assert_noop!(set_unit(6), Error::<Test>::Arx20UnitAlreadySet);
+	});
+	new_test_ext().execute_with(|| {
+		assert_ok!(shield_arx20(42 * UNIT, outputs(vec![output(1, 2)]), 0));
+		assert_noop!(set_unit(6), Error::<Test>::Arx20PoolNotEmpty);
+	});
+}
+
+#[test]
+fn a_token_unit_rejects_absurd_decimals_and_other_signers() {
+	new_test_ext().execute_with(|| {
+		assert_noop!(set_unit(37), Error::<Test>::InvalidDecimals);
+		assert_noop!(
+			Privacy::set_arx20_unit(RuntimeOrigin::signed(ALICE), arx20_token(), 6),
+			Error::<Test>::OnlyArx20Token
+		);
+	});
+}
+
+/// The constructor of a token calls this before its code is stored, so the
+/// contract-code requirement does not apply here.
+#[test]
+fn an_account_without_code_may_still_fix_its_unit() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(Privacy::set_arx20_unit(
+			RuntimeOrigin::signed(EOA_TOKEN),
+			eoa_token(),
+			6
+		));
 	});
 }

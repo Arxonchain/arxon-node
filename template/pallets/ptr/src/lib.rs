@@ -4,8 +4,9 @@
 //! four balances. It is a commitment `ptr_id = H_PTR(pk_s, pk_r, cv, nonce)`
 //! proved well formed by Circuit 4 when the private transfer that pays it
 //! executes; `pallet-privacy` hands it over through [`pallet_privacy::ReceiptSink`].
-//! Storage keeps the identifier, the payment value commitment, the block and
-//! the bundle mask: nothing a chain observer can read parties or amounts from.
+//! Storage keeps the identifier, the payment value commitment, the block, the
+//! bundle mask and the pool (native ARX or an ARX-20 token) the payment was made
+//! in: nothing a chain observer can read parties or amounts from.
 //!
 //! A receipt holder opens it selectively with a Circuit 5 proof that reveals
 //! any subset of sender, receiver and amount to an `audience` (the digest of
@@ -42,7 +43,7 @@ pub mod pallet {
 	};
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
-	use pallet_privacy::ReceiptSink;
+	use pallet_privacy::{PrivacyAsset, ReceiptSink};
 	use pallet_zk_verifier::VerifyProof;
 	use sp_runtime::traits::SaturatedConversion;
 
@@ -124,11 +125,19 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type TotalReceipts<T: Config> = StorageValue<_, u64, ValueQuery>;
 
+	/// Pool each receipt's payment was made in. Kept beside [`Receipts`] rather
+	/// than inside it so the receipts recorded before the asset was tracked keep
+	/// decoding; those have no entry here.
+	#[pallet::storage]
+	pub type ReceiptAsset<T: Config> = StorageMap<_, Blake2_128Concat, FieldBytes, PrivacyAsset>;
+
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// A private transfer attached a receipt.
 		ReceiptCreated {
+			/// Pool the payment was made in.
+			asset: PrivacyAsset,
 			/// Receipt identifier.
 			ptr_id: FieldBytes,
 			/// Block.
@@ -138,6 +147,9 @@ pub mod pallet {
 		},
 		/// A receipt was opened to `verifier`.
 		Disclosed {
+			/// Pool the payment was made in; `None` for a receipt recorded before
+			/// the asset was tracked.
+			asset: Option<PrivacyAsset>,
 			/// Receipt identifier.
 			ptr_id: FieldBytes,
 			/// Who the disclosure was made to (and who submitted it).
@@ -226,6 +238,7 @@ pub mod pallet {
 				Ok(())
 			})?;
 			Self::deposit_event(Event::Disclosed {
+				asset: ReceiptAsset::<T>::get(ptr_id),
 				ptr_id,
 				verifier: who,
 				disclosure_mask,
@@ -249,6 +262,11 @@ pub mod pallet {
 			Receipts::<T>::get(ptr_id)
 		}
 
+		/// Pool a receipt's payment was made in, if recorded.
+		pub fn receipt_asset(ptr_id: &FieldBytes) -> Option<PrivacyAsset> {
+			ReceiptAsset::<T>::get(ptr_id)
+		}
+
 		fn check_expiry(expiry_block: BlockNumberFor<T>) -> DispatchResult {
 			let now = frame_system::Pallet::<T>::block_number();
 			ensure!(expiry_block >= now, Error::<T>::ProofExpired);
@@ -267,7 +285,12 @@ pub mod pallet {
 	}
 
 	impl<T: Config> ReceiptSink for Pallet<T> {
-		fn record(ptr_id: FieldBytes, cv: FieldBytes, mask_bits: u8) -> DispatchResult {
+		fn record(
+			ptr_id: FieldBytes,
+			cv: FieldBytes,
+			mask_bits: u8,
+			asset: PrivacyAsset,
+		) -> DispatchResult {
 			ensure!(
 				!Receipts::<T>::contains_key(ptr_id),
 				Error::<T>::ReceiptAlreadyExists
@@ -281,8 +304,10 @@ pub mod pallet {
 					mask_bits,
 				},
 			);
+			ReceiptAsset::<T>::insert(ptr_id, asset);
 			TotalReceipts::<T>::mutate(|t| *t = t.saturating_add(1));
 			Self::deposit_event(Event::ReceiptCreated {
+				asset,
 				ptr_id,
 				block_number,
 				mask_bits,

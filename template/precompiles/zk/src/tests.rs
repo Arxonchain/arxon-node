@@ -17,7 +17,8 @@ use sp_core::{H160, H256, U256};
 use crate::{
 	mock::{
 		new_test_ext, precompiles, ACall, FakeVerifier, NoteTree, NullifierRegistry, PCall,
-		Privacy, Runtime, RuntimeOrigin, SCall, ZkVerifier, ALICE_BALANCE, UNIT,
+		Privacy, Runtime, RuntimeEvent, RuntimeOrigin, SCall, System, ZkVerifier, ALICE_BALANCE,
+		UNIT,
 	},
 	submit::{
 		AbiInput, AbiInputs, AbiOptionalAttachment, AbiOutput, AbiOutputs, AbiProofs,
@@ -819,6 +820,219 @@ fn submit_selectors_match_the_documented_signatures() {
 			"submitPrivateTransfer(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),(bytes,bytes,bytes,bytes,bytes))"
 		)]
 	);
+	assert_eq!(
+		SCall::unshield_with_fee_selectors(),
+		&[compute_selector(
+			"unshieldWithFee(address,uint256,bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,address,uint256,(bytes,bytes,bytes,bytes,bytes))"
+		)]
+	);
+	assert_eq!(
+		SCall::submit_private_transfer_with_fee_selectors(),
+		&[compute_selector(
+			"submitPrivateTransferWithFee(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),address,uint256,(bytes,bytes,bytes,bytes,bytes))"
+		)]
+	);
+	assert_eq!(
+		SCall::set_balance_visibility_selectors(),
+		&[compute_selector("setBalanceVisibility(bool)")]
+	);
+	assert_eq!(
+		SCall::is_balance_hidden_selectors(),
+		&[compute_selector("isBalanceHidden(address)")]
+	);
+}
+
+fn shield_42() -> H256 {
+	precompiles()
+		.prepare_test(
+			Alice,
+			submit_address(),
+			shield_call(abi_outputs(vec![abi_output(1, 2)]), 0),
+		)
+		.with_value(42 * UNIT)
+		.execute_returns(());
+	H256(NoteTree::current_root(TreeId::Note).0)
+}
+
+fn balance_of(who: impl Into<crate::mock::AccountId>) -> u128 {
+	pallet_balances::Pallet::<Runtime>::balance(&who.into())
+}
+
+#[test]
+fn submit_unshield_with_fee_pays_the_fee_recipient_from_the_pool() {
+	new_test_ext().execute_with(|| {
+		let anchor = shield_42();
+
+		precompiles()
+			.prepare_test(
+				Alice,
+				submit_address(),
+				SCall::unshield_with_fee {
+					recipient: Address(Bob.into()),
+					amount: U256::from(40 * UNIT),
+					anchor,
+					inputs: abi_inputs(vec![abi_input(10, 11)]),
+					outputs: abi_outputs(vec![]),
+					mask_bits: 0,
+					expiry_block: U256::from(EXPIRY),
+					fee_recipient: Address(Charlie.into()),
+					fee: U256::from(2 * UNIT),
+					proofs: abi_proofs(true, false),
+				},
+			)
+			.execute_returns(());
+
+		assert_eq!(balance_of(Bob), 40 * UNIT);
+		assert_eq!(balance_of(Charlie), 2 * UNIT);
+		assert_eq!(Privacy::pool_balance(), 0);
+	});
+}
+
+#[test]
+fn submit_private_transfer_with_fee_pays_the_fee_recipient_from_the_pool() {
+	new_test_ext().execute_with(|| {
+		let anchor = shield_42();
+
+		precompiles()
+			.prepare_test(
+				Alice,
+				submit_address(),
+				SCall::submit_private_transfer_with_fee {
+					anchor,
+					inputs: abi_inputs(vec![abi_input(10, 11)]),
+					outputs: abi_outputs(vec![abi_output(3, 4)]),
+					mask_bits: 0b0111,
+					expiry_block: U256::from(EXPIRY),
+					ptr: none_attachment(),
+					compliance: none_attachment(),
+					fee_recipient: Address(Charlie.into()),
+					fee: U256::from(2 * UNIT),
+					proofs: abi_proofs(true, true),
+				},
+			)
+			.execute_returns(());
+
+		assert_eq!(balance_of(Charlie), 2 * UNIT);
+		assert_eq!(Privacy::pool_balance(), 40 * UNIT);
+	});
+}
+
+#[test]
+fn submit_unshield_with_fee_reverts_when_the_fee_is_not_a_whole_shielded_unit() {
+	new_test_ext().execute_with(|| {
+		let anchor = shield_42();
+
+		precompiles()
+			.prepare_test(
+				Alice,
+				submit_address(),
+				SCall::unshield_with_fee {
+					recipient: Address(Bob.into()),
+					amount: U256::from(40 * UNIT),
+					anchor,
+					inputs: abi_inputs(vec![abi_input(10, 11)]),
+					outputs: abi_outputs(vec![]),
+					mask_bits: 0,
+					expiry_block: U256::from(EXPIRY),
+					fee_recipient: Address(Charlie.into()),
+					fee: U256::from(2 * UNIT + 1),
+					proofs: abi_proofs(true, false),
+				},
+			)
+			.execute_reverts(|out| revert_contains(out, "AmountNotMultipleOfUnit"));
+
+		assert_eq!(Privacy::pool_balance(), 42 * UNIT);
+	});
+}
+
+#[test]
+fn set_balance_visibility_takes_effect_after_the_proof_validity_window() {
+	new_test_ext().execute_with(|| {
+		precompiles()
+			.prepare_test(
+				Alice,
+				submit_address(),
+				SCall::set_balance_visibility { hidden: true },
+			)
+			.execute_returns(());
+
+		precompiles()
+			.prepare_test(
+				Bob,
+				submit_address(),
+				SCall::is_balance_hidden {
+					account: Address(Alice.into()),
+				},
+			)
+			.execute_returns(false);
+		frame_system::Pallet::<Runtime>::set_block_number(1 + 128 + 1);
+		precompiles()
+			.prepare_test(
+				Bob,
+				submit_address(),
+				SCall::is_balance_hidden {
+					account: Address(Alice.into()),
+				},
+			)
+			.with_static_call(true)
+			.execute_returns(true);
+	});
+}
+
+/// The test handle's `tx.origin` is Alice, so Bob is a contract Alice called.
+#[test]
+fn set_balance_visibility_reverts_for_a_contract_caller() {
+	new_test_ext().execute_with(|| {
+		precompiles()
+			.prepare_test(
+				Bob,
+				submit_address(),
+				SCall::set_balance_visibility { hidden: true },
+			)
+			.execute_reverts(|out| revert_contains(out, "only the transaction signer"));
+	});
+}
+
+#[test]
+fn set_balance_visibility_reverts_in_a_static_call() {
+	new_test_ext().execute_with(|| {
+		precompiles()
+			.prepare_test(
+				Alice,
+				submit_address(),
+				SCall::set_balance_visibility { hidden: true },
+			)
+			.with_static_call(true)
+			.execute_reverts(|out| !out.is_empty());
+	});
+}
+
+#[test]
+fn unshield_to_an_account_that_hides_its_balance_reverts() {
+	new_test_ext().execute_with(|| {
+		let anchor = shield_42();
+		pallet_privacy::HideBalanceAccounts::<Runtime>::insert(
+			crate::mock::AccountId::from(Bob),
+			true,
+		);
+
+		precompiles()
+			.prepare_test(
+				Alice,
+				submit_address(),
+				SCall::unshield {
+					recipient: Address(Bob.into()),
+					amount: U256::from(42 * UNIT),
+					anchor,
+					inputs: abi_inputs(vec![abi_input(10, 11)]),
+					outputs: abi_outputs(vec![]),
+					mask_bits: 0,
+					expiry_block: U256::from(EXPIRY),
+					proofs: abi_proofs(true, false),
+				},
+			)
+			.execute_reverts(|out| revert_contains(out, "RecipientHidesBalance"));
+	});
 }
 
 // --- 0x802 ARX-20 --------------------------------------------------------------------------------
@@ -905,6 +1119,142 @@ fn arx20_selectors_match_the_documented_signatures() {
 		ACall::get_note_leaves_selectors(),
 		&[compute_selector("getNoteLeaves(address,uint256,uint256)")]
 	);
+	assert_eq!(
+		ACall::unshield_with_fee_selectors(),
+		&[compute_selector(
+			"unshieldWithFee(address,uint256,bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,address,uint256,(bytes,bytes,bytes,bytes,bytes))"
+		)]
+	);
+	assert_eq!(
+		ACall::submit_private_transfer_with_fee_selectors(),
+		&[compute_selector(
+			"submitPrivateTransferWithFee(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),address,uint256,(bytes,bytes,bytes,bytes,bytes))"
+		)]
+	);
+	assert_eq!(
+		ACall::set_shielded_decimals_selectors(),
+		&[compute_selector("setShieldedDecimals(uint8)")]
+	);
+	assert_eq!(
+		ACall::shielded_unit_selectors(),
+		&[compute_selector("shieldedUnit(address)")]
+	);
+}
+
+fn arx20_shield(amount: u128) {
+	precompiles()
+		.prepare_test(
+			token(),
+			arx20_address(),
+			ACall::shield {
+				amount: U256::from(amount),
+				outputs: abi_outputs(vec![abi_output(1, 2)]),
+				mask_bits: 0,
+				expiry_block: U256::from(EXPIRY),
+				proofs: abi_proofs(false, true),
+			},
+		)
+		.execute_returns(());
+}
+
+#[test]
+fn arx20_unshield_with_fee_records_the_fee_in_the_token_and_moves_no_arx() {
+	new_test_ext().execute_with(|| {
+		arx20_shield(42 * UNIT);
+		let anchor = H256(NoteTree::current_root(TreeId::Arx20(token())).0);
+
+		precompiles()
+			.prepare_test(
+				token(),
+				arx20_address(),
+				ACall::unshield_with_fee {
+					recipient: Address(Bob.into()),
+					amount: U256::from(40 * UNIT),
+					anchor,
+					inputs: abi_inputs(vec![abi_input(10, 11)]),
+					outputs: abi_outputs(vec![]),
+					mask_bits: 0,
+					expiry_block: U256::from(EXPIRY),
+					fee_recipient: Address(Charlie.into()),
+					fee: U256::from(2 * UNIT),
+					proofs: abi_proofs(true, false),
+				},
+			)
+			.execute_returns(());
+
+		assert_eq!(balance_of(Charlie), 0);
+		assert_eq!(balance_of(Bob), 0);
+		let paid = System::events().into_iter().any(|r| {
+			matches!(
+				r.event,
+				RuntimeEvent::Privacy(pallet_privacy::Event::FeePaid {
+					asset: pallet_privacy::PrivacyAsset::Arx20(t),
+					amount,
+					..
+				}) if t == token() && amount == 2 * UNIT
+			)
+		});
+		assert!(
+			paid,
+			"FeePaid names the token and the fee in its base units"
+		);
+	});
+}
+
+fn assert_shielded_unit(token: H160, expected: u128) {
+	precompiles()
+		.prepare_test(
+			Alice,
+			arx20_address(),
+			ACall::shielded_unit {
+				token: Address(token),
+			},
+		)
+		.with_static_call(true)
+		.execute_returns(U256::from(expected));
+}
+
+#[test]
+fn arx20_set_shielded_decimals_fixes_the_callers_unit() {
+	new_test_ext().execute_with(|| {
+		assert_shielded_unit(token(), UNIT);
+
+		precompiles()
+			.prepare_test(
+				token(),
+				arx20_address(),
+				ACall::set_shielded_decimals { decimals: 6 },
+			)
+			.execute_returns(());
+
+		assert_shielded_unit(token(), 1);
+		arx20_shield(5);
+		assert!(NoteTree::contains_leaf(
+			TreeId::Arx20(token()),
+			&FieldBytes(h(1).0)
+		));
+	});
+}
+
+#[test]
+fn arx20_set_shielded_decimals_reverts_once_fixed() {
+	new_test_ext().execute_with(|| {
+		precompiles()
+			.prepare_test(
+				token(),
+				arx20_address(),
+				ACall::set_shielded_decimals { decimals: 18 },
+			)
+			.execute_returns(());
+
+		precompiles()
+			.prepare_test(
+				token(),
+				arx20_address(),
+				ACall::set_shielded_decimals { decimals: 6 },
+			)
+			.execute_reverts(|out| revert_contains(out, "Arx20UnitAlreadySet"));
+	});
 }
 
 #[test]

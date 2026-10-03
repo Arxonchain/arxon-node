@@ -142,6 +142,9 @@ pub trait MerkleTree {
 	/// `true` iff `leaf` was already inserted (an insert would fail with a duplicate).
 	fn contains_leaf(tree: TreeId, leaf: &FieldBytes) -> bool;
 
+	/// Number of leaves inserted into `tree`.
+	fn leaf_count(tree: TreeId) -> u64;
+
 	/// Weight of one [`Self::insert`] into `tree`, for consumers' weight functions.
 	fn insert_weight(tree: TreeId) -> frame_support::weights::Weight;
 }
@@ -421,6 +424,10 @@ pub mod pallet {
 
 		fn contains_leaf(tree: TreeId, leaf: &FieldBytes) -> bool {
 			KnownLeaves::<T>::contains_key(tree, leaf)
+		}
+
+		fn leaf_count(tree: TreeId) -> u64 {
+			Pallet::<T>::leaf_count(tree)
 		}
 
 		fn insert_weight(tree: TreeId) -> Weight {

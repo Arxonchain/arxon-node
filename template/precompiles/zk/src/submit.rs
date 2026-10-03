@@ -11,6 +11,15 @@
 //! tuple; `present = false` skips them. `shield` is payable: the deposit is
 //! `msg.value` so Hide amount is not a named ABI `uint256`. Unshield and
 //! private transfer still take amounts as ABI `uint256` and reject value.
+//!
+//! The `WithFee` variants are for relayers: the bundle pays `fee` wei from the
+//! pool to `feeRecipient` through the Circuit 2 `fee` row, and both are bound
+//! into the proofs, so the relayer that submits cannot change either.
+//!
+//! `setBalanceVisibility` is the hide-balance switch of the caller, an account
+//! signing its own transaction (`msg.sender == tx.origin`). It takes effect
+//! `MaxProofValidity + 1` blocks later; `isBalanceHidden` answers with the
+//! value in force now.
 
 use alloc::vec::Vec;
 use core::marker::PhantomData;
@@ -24,7 +33,7 @@ use frame_system::RawOrigin;
 use pallet_evm::AddressMapping;
 use pallet_privacy::{
 	ComplianceAttachment, EncryptedNote, Input, Inputs, Output, Outputs, ProofBundle,
-	PtrAttachment, MAX_ENCRYPTED_NOTE, MAX_NOTES,
+	PtrAttachment, RelayFee, RelayFeeOf, MAX_ENCRYPTED_NOTE, MAX_NOTES,
 };
 use precompile_utils::prelude::*;
 use sp_core::{H256, U256};
@@ -212,6 +221,116 @@ where
 		)?;
 		Ok(())
 	}
+
+	/// [`Self::unshield`] paying `fee` wei from the pool to `feeRecipient`.
+	#[precompile::public(
+		"unshieldWithFee(address,uint256,bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,address,uint256,(bytes,bytes,bytes,bytes,bytes))"
+	)]
+	fn unshield_with_fee(
+		handle: &mut impl PrecompileHandle,
+		recipient: Address,
+		amount: U256,
+		anchor: H256,
+		inputs: AbiInputs,
+		outputs: AbiOutputs,
+		mask_bits: u8,
+		expiry_block: U256,
+		fee_recipient: Address,
+		fee: U256,
+		proofs: AbiProofs,
+	) -> EvmResult {
+		ensure_direct_call(handle)?;
+		ensure_no_value(handle)?;
+		let recipient = R::AddressMapping::into_account_id(recipient.into());
+		RuntimeHelper::<R>::try_dispatch(
+			handle,
+			signed_origin::<R>(handle),
+			pallet_privacy::Call::<R>::unshield_with_fee {
+				recipient,
+				amount: to_balance::<R>(amount)?,
+				anchor: FieldBytes(anchor.0),
+				inputs: to_inputs(inputs)?,
+				outputs: to_outputs(outputs)?,
+				mask_bits,
+				expiry_block: to_block_number::<R>(expiry_block)?,
+				fee: to_relay_fee::<R>(fee_recipient, fee)?,
+				proofs: to_proofs(proofs)?,
+			},
+			0,
+		)?;
+		Ok(())
+	}
+
+	/// [`Self::submit_private_transfer`] paying `fee` wei from the pool to `feeRecipient`.
+	#[precompile::public(
+		"submitPrivateTransferWithFee(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),address,uint256,(bytes,bytes,bytes,bytes,bytes))"
+	)]
+	fn submit_private_transfer_with_fee(
+		handle: &mut impl PrecompileHandle,
+		anchor: H256,
+		inputs: AbiInputs,
+		outputs: AbiOutputs,
+		mask_bits: u8,
+		expiry_block: U256,
+		ptr: AbiOptionalAttachment,
+		compliance: AbiOptionalAttachment,
+		fee_recipient: Address,
+		fee: U256,
+		proofs: AbiProofs,
+	) -> EvmResult {
+		ensure_direct_call(handle)?;
+		ensure_no_value(handle)?;
+		RuntimeHelper::<R>::try_dispatch(
+			handle,
+			signed_origin::<R>(handle),
+			pallet_privacy::Call::<R>::submit_private_transfer_with_fee {
+				anchor: FieldBytes(anchor.0),
+				inputs: to_inputs(inputs)?,
+				outputs: to_outputs(outputs)?,
+				mask_bits,
+				expiry_block: to_block_number::<R>(expiry_block)?,
+				ptr: to_ptr(ptr)?,
+				compliance: to_compliance(compliance)?,
+				fee: to_relay_fee::<R>(fee_recipient, fee)?,
+				proofs: to_proofs(proofs)?,
+			},
+			0,
+		)?;
+		Ok(())
+	}
+
+	/// Turns hide-balance on or off for the caller, an account signing its own
+	/// transaction. Takes effect `MaxProofValidity + 1` blocks later.
+	#[precompile::public("setBalanceVisibility(bool)")]
+	fn set_balance_visibility(handle: &mut impl PrecompileHandle, hidden: bool) -> EvmResult {
+		ensure_direct_call(handle)?;
+		ensure_no_value(handle)?;
+		// A contract cannot flag itself: an exchange or a token flagged by its
+		// own code would refuse every payout made to it, a surprise for the
+		// people paying it rather than a privacy choice of an owner.
+		if handle.context().caller != handle.origin() {
+			return Err(revert("only the transaction signer"));
+		}
+		RuntimeHelper::<R>::try_dispatch(
+			handle,
+			signed_origin::<R>(handle),
+			pallet_privacy::Call::<R>::set_balance_visibility { hidden },
+			0,
+		)?;
+		Ok(())
+	}
+
+	/// `true` iff hide-balance is in force for `account` now (a change still
+	/// maturing reports the previous value).
+	#[precompile::public("isBalanceHidden(address)")]
+	#[precompile::view]
+	fn is_balance_hidden(handle: &mut impl PrecompileHandle, account: Address) -> EvmResult<bool> {
+		// The flag and the block it last changed at.
+		handle.record_db_read::<R>(1)?;
+		handle.record_db_read::<R>(4)?;
+		let who = R::AddressMapping::into_account_id(account.into());
+		Ok(pallet_privacy::Pallet::<R>::is_balance_hidden(&who))
+	}
 }
 
 /// The submission precompiles act for `context.caller`. Under DELEGATECALL
@@ -266,6 +385,19 @@ where
 {
 	let amount: u128 = amount.try_into().map_err(|_| revert("amount overflow"))?;
 	amount.try_into().map_err(|_| revert("amount overflow"))
+}
+
+pub(crate) fn to_relay_fee<R>(recipient: Address, amount: U256) -> EvmResult<RelayFeeOf<R>>
+where
+	R: pallet_evm::Config
+		+ pallet_privacy::Config
+		+ frame_system::Config<AccountId = pallet_evm::AccountIdOf<R>>,
+	pallet_privacy::BalanceOf<R>: TryFrom<u128>,
+{
+	Ok(RelayFee {
+		amount: to_balance::<R>(amount)?,
+		recipient: R::AddressMapping::into_account_id(recipient.into()),
+	})
 }
 
 pub(crate) fn to_block_number<R>(

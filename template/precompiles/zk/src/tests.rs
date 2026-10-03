@@ -21,7 +21,7 @@ use crate::{
 		UNIT,
 	},
 	submit::{
-		AbiInput, AbiInputs, AbiOptionalAttachment, AbiOutput, AbiOutputs, AbiProofs,
+		AbiInput, AbiInputs, AbiOptionalAttachment, AbiOutput, AbiOutputs, AbiProofs, AbiRelayFee,
 		SUBMIT_ADDRESS,
 	},
 	AbiInstance, AbiProof, AbiPublicInputs, ADDRESS,
@@ -823,13 +823,13 @@ fn submit_selectors_match_the_documented_signatures() {
 	assert_eq!(
 		SCall::unshield_with_fee_selectors(),
 		&[compute_selector(
-			"unshieldWithFee(address,uint256,bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,address,uint256,(bytes,bytes,bytes,bytes,bytes))"
+			"unshieldWithFee(address,uint256,bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(address,uint256),(bytes,bytes,bytes,bytes,bytes))"
 		)]
 	);
 	assert_eq!(
 		SCall::submit_private_transfer_with_fee_selectors(),
 		&[compute_selector(
-			"submitPrivateTransferWithFee(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),address,uint256,(bytes,bytes,bytes,bytes,bytes))"
+			"submitPrivateTransferWithFee(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),(address,uint256),(bytes,bytes,bytes,bytes,bytes))"
 		)]
 	);
 	assert_eq!(
@@ -875,8 +875,10 @@ fn submit_unshield_with_fee_pays_the_fee_recipient_from_the_pool() {
 					outputs: abi_outputs(vec![]),
 					mask_bits: 0,
 					expiry_block: U256::from(EXPIRY),
-					fee_recipient: Address(Charlie.into()),
-					fee: U256::from(2 * UNIT),
+					fee: AbiRelayFee {
+						recipient: Address(Charlie.into()),
+						amount: U256::from(2 * UNIT),
+					},
 					proofs: abi_proofs(true, false),
 				},
 			)
@@ -905,8 +907,10 @@ fn submit_private_transfer_with_fee_pays_the_fee_recipient_from_the_pool() {
 					expiry_block: U256::from(EXPIRY),
 					ptr: none_attachment(),
 					compliance: none_attachment(),
-					fee_recipient: Address(Charlie.into()),
-					fee: U256::from(2 * UNIT),
+					fee: AbiRelayFee {
+						recipient: Address(Charlie.into()),
+						amount: U256::from(2 * UNIT),
+					},
 					proofs: abi_proofs(true, true),
 				},
 			)
@@ -934,8 +938,10 @@ fn submit_unshield_with_fee_reverts_when_the_fee_is_not_a_whole_shielded_unit() 
 					outputs: abi_outputs(vec![]),
 					mask_bits: 0,
 					expiry_block: U256::from(EXPIRY),
-					fee_recipient: Address(Charlie.into()),
-					fee: U256::from(2 * UNIT + 1),
+					fee: AbiRelayFee {
+						recipient: Address(Charlie.into()),
+						amount: U256::from(2 * UNIT + 1),
+					},
 					proofs: abi_proofs(true, false),
 				},
 			)
@@ -1122,13 +1128,13 @@ fn arx20_selectors_match_the_documented_signatures() {
 	assert_eq!(
 		ACall::unshield_with_fee_selectors(),
 		&[compute_selector(
-			"unshieldWithFee(address,uint256,bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,address,uint256,(bytes,bytes,bytes,bytes,bytes))"
+			"unshieldWithFee(address,uint256,bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(address,uint256),(bytes,bytes,bytes,bytes,bytes))"
 		)]
 	);
 	assert_eq!(
 		ACall::submit_private_transfer_with_fee_selectors(),
 		&[compute_selector(
-			"submitPrivateTransferWithFee(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),address,uint256,(bytes,bytes,bytes,bytes,bytes))"
+			"submitPrivateTransferWithFee(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),(address,uint256),(bytes,bytes,bytes,bytes,bytes))"
 		)]
 	);
 	assert_eq!(
@@ -1175,8 +1181,10 @@ fn arx20_unshield_with_fee_records_the_fee_in_the_token_and_moves_no_arx() {
 					outputs: abi_outputs(vec![]),
 					mask_bits: 0,
 					expiry_block: U256::from(EXPIRY),
-					fee_recipient: Address(Charlie.into()),
-					fee: U256::from(2 * UNIT),
+					fee: AbiRelayFee {
+						recipient: Address(Charlie.into()),
+						amount: U256::from(2 * UNIT),
+					},
 					proofs: abi_proofs(true, false),
 				},
 			)

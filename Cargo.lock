@@ -649,6 +649,7 @@ dependencies = [
 name = "arxon-runtime"
 version = "0.0.0"
 dependencies = [
+ "arxon-prove",
  "arxon-zk",
  "arxon-zk-primitives",
  "arxon-zk-runtime-api",
@@ -664,6 +665,7 @@ dependencies = [
  "frame-system",
  "frame-system-benchmarking",
  "frame-system-rpc-runtime-api",
+ "hex",
  "hex-literal",
  "pallet-arx-claim",
  "pallet-aura",

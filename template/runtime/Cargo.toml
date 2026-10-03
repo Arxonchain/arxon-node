@@ -87,7 +87,9 @@ polkadot-runtime-common = { workspace = true }
 cumulus-pallet-weight-reclaim = { workspace = true }
 
 [dev-dependencies]
+arxon-prove = { path = "../../crates/zk-prover" }
 arxon-zk = { workspace = true, features = ["multicore"] }
+hex = { workspace = true, features = ["std"] }
 rand_core = { workspace = true, features = ["getrandom"] }
 sp-io = { workspace = true, features = ["default"] }
 

@@ -67,3 +67,21 @@ jobs:
 
       - name: Check no_std crates against wasm32v1-none
         run: make check-wasm
+
+  relayer:
+    name: Test relayer checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install relayer dependencies
+        run: python -m pip install eth-account eth-abi
+
+      - name: Run relayer tests
+        run: cd deploy && python -m unittest test_relayer.py

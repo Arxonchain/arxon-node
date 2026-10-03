@@ -76,4 +76,26 @@ describeWithFrontier("Arxon ZK submit precompile (0x801)", (context) => {
 		);
 		expect(root.result).to.equal(NOTE_TREE_EMPTY_ROOT);
 	});
+
+	function isBalanceHiddenData(account: string) {
+		return context.web3.eth.abi.encodeFunctionCall(
+			{ name: "isBalanceHidden", type: "function", inputs: [{ type: "address", name: "account" }] },
+			[account]
+		);
+	}
+
+	it("isBalanceHidden is false for an account that never set it", async function () {
+		const result = await call(ARXON_ZK_SUBMIT_PRECOMPILE, isBalanceHiddenData(GENESIS_ACCOUNT));
+		expect(result.error, JSON.stringify(result.error)).to.be.undefined;
+		expect(context.web3.eth.abi.decodeParameter("bool", result.result)).to.equal(false);
+	});
+
+	it("setBalanceVisibility is accepted from the signing account", async function () {
+		const data = context.web3.eth.abi.encodeFunctionCall(
+			{ name: "setBalanceVisibility", type: "function", inputs: [{ type: "bool", name: "hidden" }] },
+			[true]
+		);
+		const result = await call(ARXON_ZK_SUBMIT_PRECOMPILE, data);
+		expect(result.error, JSON.stringify(result.error)).to.be.undefined;
+	});
 });

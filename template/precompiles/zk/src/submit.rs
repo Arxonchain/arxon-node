@@ -12,9 +12,10 @@
 //! `msg.value` so Hide amount is not a named ABI `uint256`. Unshield and
 //! private transfer still take amounts as ABI `uint256` and reject value.
 //!
-//! The `WithFee` variants are for relayers: the bundle pays `fee` wei from the
-//! pool to `feeRecipient` through the Circuit 2 `fee` row, and both are bound
-//! into the proofs, so the relayer that submits cannot change either.
+//! The `WithFee` variants are for relayers: the bundle pays a fee
+//! `(address recipient, uint256 amount)` from the pool through the Circuit 2
+//! `fee` row, and both fields are bound into the proofs, so the relayer that
+//! submits cannot change either.
 //!
 //! `setBalanceVisibility` is the hide-balance switch of the caller, an account
 //! signing its own transaction (`msg.sender == tx.origin`). It takes effect
@@ -81,6 +82,15 @@ pub struct AbiProofs {
 	pub receipt: BoundedBytes<ConstU32<MAX_PROOF_BYTES>>,
 	/// Circuit 6, iff a compliance attestation is attached.
 	pub compliance: BoundedBytes<ConstU32<MAX_PROOF_BYTES>>,
+}
+
+/// Relayer fee of a `WithFee` call: `amount` base units paid from the pool to `recipient`.
+#[derive(Clone, Debug, Eq, PartialEq, solidity::Codec)]
+pub struct AbiRelayFee {
+	/// Account the fee is paid to.
+	pub recipient: Address,
+	/// Fee in base units (wei for ARX), a multiple of the pool's shielded unit.
+	pub amount: U256,
 }
 
 /// Optional PTR or compliance attachment. `present = false` means `None`.
@@ -222,9 +232,9 @@ where
 		Ok(())
 	}
 
-	/// [`Self::unshield`] paying `fee` wei from the pool to `feeRecipient`.
+	/// [`Self::unshield`] paying `fee.amount` wei from the pool to `fee.recipient`.
 	#[precompile::public(
-		"unshieldWithFee(address,uint256,bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,address,uint256,(bytes,bytes,bytes,bytes,bytes))"
+		"unshieldWithFee(address,uint256,bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(address,uint256),(bytes,bytes,bytes,bytes,bytes))"
 	)]
 	fn unshield_with_fee(
 		handle: &mut impl PrecompileHandle,
@@ -235,8 +245,7 @@ where
 		outputs: AbiOutputs,
 		mask_bits: u8,
 		expiry_block: U256,
-		fee_recipient: Address,
-		fee: U256,
+		fee: AbiRelayFee,
 		proofs: AbiProofs,
 	) -> EvmResult {
 		ensure_direct_call(handle)?;
@@ -253,7 +262,7 @@ where
 				outputs: to_outputs(outputs)?,
 				mask_bits,
 				expiry_block: to_block_number::<R>(expiry_block)?,
-				fee: to_relay_fee::<R>(fee_recipient, fee)?,
+				fee: to_relay_fee::<R>(fee)?,
 				proofs: to_proofs(proofs)?,
 			},
 			0,
@@ -261,9 +270,9 @@ where
 		Ok(())
 	}
 
-	/// [`Self::submit_private_transfer`] paying `fee` wei from the pool to `feeRecipient`.
+	/// [`Self::submit_private_transfer`] paying `fee.amount` wei from the pool to `fee.recipient`.
 	#[precompile::public(
-		"submitPrivateTransferWithFee(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),address,uint256,(bytes,bytes,bytes,bytes,bytes))"
+		"submitPrivateTransferWithFee(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),(address,uint256),(bytes,bytes,bytes,bytes,bytes))"
 	)]
 	fn submit_private_transfer_with_fee(
 		handle: &mut impl PrecompileHandle,
@@ -274,8 +283,7 @@ where
 		expiry_block: U256,
 		ptr: AbiOptionalAttachment,
 		compliance: AbiOptionalAttachment,
-		fee_recipient: Address,
-		fee: U256,
+		fee: AbiRelayFee,
 		proofs: AbiProofs,
 	) -> EvmResult {
 		ensure_direct_call(handle)?;
@@ -291,7 +299,7 @@ where
 				expiry_block: to_block_number::<R>(expiry_block)?,
 				ptr: to_ptr(ptr)?,
 				compliance: to_compliance(compliance)?,
-				fee: to_relay_fee::<R>(fee_recipient, fee)?,
+				fee: to_relay_fee::<R>(fee)?,
 				proofs: to_proofs(proofs)?,
 			},
 			0,
@@ -387,7 +395,7 @@ where
 	amount.try_into().map_err(|_| revert("amount overflow"))
 }
 
-pub(crate) fn to_relay_fee<R>(recipient: Address, amount: U256) -> EvmResult<RelayFeeOf<R>>
+pub(crate) fn to_relay_fee<R>(fee: AbiRelayFee) -> EvmResult<RelayFeeOf<R>>
 where
 	R: pallet_evm::Config
 		+ pallet_privacy::Config
@@ -395,8 +403,8 @@ where
 	pallet_privacy::BalanceOf<R>: TryFrom<u128>,
 {
 	Ok(RelayFee {
-		amount: to_balance::<R>(amount)?,
-		recipient: R::AddressMapping::into_account_id(recipient.into()),
+		amount: to_balance::<R>(fee.amount)?,
+		recipient: R::AddressMapping::into_account_id(fee.recipient.into()),
 	})
 }
 

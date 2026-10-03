@@ -11,9 +11,21 @@ pragma solidity ^0.8.20;
 /// issuer wants shield / private transfer / unshield.
 ///
 /// Public `transfer` / `approve` remain ERC-20 (visible). Privacy is the extra
-/// door into a per-token tree at precompile `0x802`. Amounts must be multiples
-/// of 10^9 base units (same shielded unit as native ARX). `hide_balance` is
-/// recorded with the mask; Circuit 1 does not constrain it yet.
+/// door into a per-token tree at precompile `0x802`, which only a deployed
+/// contract can open (an EOA or an EIP-7702 delegated account is refused).
+///
+/// Amounts and fees are multiples of the token's shielded unit,
+/// `0x802.shieldedUnit(token)`: `10^(decimals - 9)` base units, or 1 for 9
+/// decimals or fewer, once the token calls `0x802.setShieldedDecimals` (the
+/// reference does it in its constructor). A token that never does keeps 10^9.
+///
+/// Hide balance: a bundle with mask bit 3 can pay privately but never
+/// unshields, and nothing is unshielded to an account that turned hide balance
+/// on at `0x801.setBalanceVisibility(true)`; its money stays in the pool.
+///
+/// The `WithFee` variants let a relayer submit for a user: the proofs bind
+/// the fee `(recipient, amount)`, the pool releases it next to the payment,
+/// and the token mints it to the fee recipient.
 interface IARX20 {
     event Transfer(address indexed from, address indexed to, uint256 value);
     event Approval(address indexed owner, address indexed spender, uint256 value);
@@ -48,6 +60,11 @@ interface IARX20 {
         bytes balance;
         bytes receipt;
         bytes compliance;
+    }
+
+    struct RelayFee {
+        address recipient;
+        uint256 amount;
     }
 
     struct OptionalAttachment {
@@ -86,6 +103,32 @@ interface IARX20 {
         uint256 expiryBlock,
         OptionalAttachment calldata ptr,
         OptionalAttachment calldata compliance,
+        Proofs calldata proofs
+    ) external;
+
+    /// `unshield` relayed: also mints `fee.amount` to `fee.recipient`.
+    function unshieldWithFee(
+        address recipient,
+        uint256 amount,
+        bytes32 anchor,
+        Input[] calldata inputs,
+        Output[] calldata outputs,
+        uint8 maskBits,
+        uint256 expiryBlock,
+        RelayFee calldata fee,
+        Proofs calldata proofs
+    ) external;
+
+    /// `transferPrivate` relayed: the fee leaves the pool and is minted to `fee.recipient`.
+    function transferPrivateWithFee(
+        bytes32 anchor,
+        Input[] calldata inputs,
+        Output[] calldata outputs,
+        uint8 maskBits,
+        uint256 expiryBlock,
+        OptionalAttachment calldata ptr,
+        OptionalAttachment calldata compliance,
+        RelayFee calldata fee,
         Proofs calldata proofs
     ) external;
 }

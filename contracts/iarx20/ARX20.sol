@@ -34,6 +34,35 @@ interface IARX20Pool {
         IARX20.OptionalAttachment calldata compliance,
         IARX20.Proofs calldata proofs
     ) external;
+
+    function unshieldWithFee(
+        address recipient,
+        uint256 amount,
+        bytes32 anchor,
+        IARX20.Input[] calldata inputs,
+        IARX20.Output[] calldata outputs,
+        uint8 maskBits,
+        uint256 expiryBlock,
+        IARX20.RelayFee calldata fee,
+        IARX20.Proofs calldata proofs
+    ) external;
+
+    function submitPrivateTransferWithFee(
+        bytes32 anchor,
+        IARX20.Input[] calldata inputs,
+        IARX20.Output[] calldata outputs,
+        uint8 maskBits,
+        uint256 expiryBlock,
+        IARX20.OptionalAttachment calldata ptr,
+        IARX20.OptionalAttachment calldata compliance,
+        IARX20.RelayFee calldata fee,
+        IARX20.Proofs calldata proofs
+    ) external;
+
+    /// Fixes the caller's shielded unit from its decimals; once, while its pool is empty.
+    function setShieldedDecimals(uint8 decimals) external;
+
+    function shieldedUnit(address token) external view returns (uint256);
 }
 
 /// @title Reference ARX-20
@@ -44,16 +73,26 @@ contract ARX20 is IARX20 {
 
     string public name;
     string public symbol;
-    uint8 public constant decimals = 18;
+    uint8 public immutable decimals;
 
     uint256 public totalSupply;
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
-    constructor(string memory name_, string memory symbol_, uint256 initialSupply) {
+    /// Fixes the pool's shielded unit from `decimals_` (`10^(decimals - 9)`
+    /// base units, 1 at 9 or fewer), so a 6-decimal token can shield cents.
+    /// It must happen here: the unit can only be set while the pool is empty.
+    constructor(string memory name_, string memory symbol_, uint8 decimals_, uint256 initialSupply) {
         name = name_;
         symbol = symbol_;
+        decimals = decimals_;
+        POOL.setShieldedDecimals(decimals_);
         _mint(msg.sender, initialSupply);
+    }
+
+    /// Base units per shielded unit: amounts and fees must be multiples of it.
+    function shieldedUnit() external view returns (uint256) {
+        return POOL.shieldedUnit(address(this));
     }
 
     function transfer(address to, uint256 value) external returns (bool) {
@@ -115,6 +154,41 @@ contract ARX20 is IARX20 {
         POOL.submitPrivateTransfer(
             anchor, inputs, outputs, maskBits, expiryBlock, ptr, compliance, proofs
         );
+    }
+
+    function unshieldWithFee(
+        address recipient,
+        uint256 amount,
+        bytes32 anchor,
+        Input[] calldata inputs,
+        Output[] calldata outputs,
+        uint8 maskBits,
+        uint256 expiryBlock,
+        RelayFee calldata fee,
+        Proofs calldata proofs
+    ) external {
+        POOL.unshieldWithFee(
+            recipient, amount, anchor, inputs, outputs, maskBits, expiryBlock, fee, proofs
+        );
+        _mint(recipient, amount);
+        _mint(fee.recipient, fee.amount);
+    }
+
+    function transferPrivateWithFee(
+        bytes32 anchor,
+        Input[] calldata inputs,
+        Output[] calldata outputs,
+        uint8 maskBits,
+        uint256 expiryBlock,
+        OptionalAttachment calldata ptr,
+        OptionalAttachment calldata compliance,
+        RelayFee calldata fee,
+        Proofs calldata proofs
+    ) external {
+        POOL.submitPrivateTransferWithFee(
+            anchor, inputs, outputs, maskBits, expiryBlock, ptr, compliance, fee, proofs
+        );
+        _mint(fee.recipient, fee.amount);
     }
 
     function _transfer(address from, address to, uint256 value) internal {

@@ -1,10 +1,23 @@
 //! Wallet Halo2 proving (keys, shield, private transfer, unshield).
 //! The HTTP binary and the browser WASM crate both call this.
+//!
+//! Amounts are in base units (wei for ARX). A pool counts them in shielded
+//! units: 10^9 base units for native ARX, and for an ARX-20 token the
+//! `shieldedUnit(token)` the `0x802` precompile reports (send it as
+//! `shielded_unit_wei`; omitted means 10^9, the unit of a token that never
+//! fixed its own).
+//!
+//! A relayed transfer or unshield sets `fee_wei` and `fee_recipient`: the fee
+//! comes out of the spent note, next to the payment and the change, and both
+//! are bound into the proofs. A bundle with mask bit 3 (hide balance) never
+//! unshields; the prover refuses to build one.
 
 use arxon_zk::circuits::{C1Circuit, C2Circuit, C3Circuit};
 use arxon_zk::key_cache::proving_key;
 use arxon_zk::merkle::{NoteTree as ReferenceNoteTree, TreeKind};
-use arxon_zk::primitives::mask::{hides_amount, hides_receiver, hides_sender, is_valid_mask};
+use arxon_zk::primitives::mask::{
+	hides_amount, hides_balance, hides_receiver, hides_sender, is_valid_mask,
+};
 use arxon_zk::primitives::poseidon::{fp_from_bytes, fp_to_bytes};
 use arxon_zk::primitives::{
 	arx20_bundle_digest, bundle_digest, encrypted_notes_hash, BundleFields, FieldBytes, CHAIN_ID,
@@ -50,6 +63,9 @@ pub struct ShieldReq {
 	/// ARX-20 contract. Empty / omitted = native ARX digest.
 	#[serde(default)]
 	token: Option<String>,
+	/// Base units per shielded unit of the pool. Omitted = 10^9.
+	#[serde(default)]
+	shielded_unit_wei: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -71,6 +87,15 @@ pub struct TransferReq {
 	/// ARX-20 contract. Empty / omitted = native ARX digest.
 	#[serde(default)]
 	token: Option<String>,
+	/// Base units per shielded unit of the pool. Omitted = 10^9.
+	#[serde(default)]
+	shielded_unit_wei: Option<String>,
+	/// Relayer fee in base units, paid from the pool. Needs `fee_recipient`.
+	#[serde(default)]
+	fee_wei: Option<String>,
+	/// EVM address the fee is paid to (for ARX-20, the token mints it there).
+	#[serde(default)]
+	fee_recipient: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -85,6 +110,15 @@ pub struct UnshieldReq {
 	/// ARX-20 contract. Empty / omitted = native ARX digest.
 	#[serde(default)]
 	token: Option<String>,
+	/// Base units per shielded unit of the pool. Omitted = 10^9.
+	#[serde(default)]
+	shielded_unit_wei: Option<String>,
+	/// Relayer fee in base units, paid from the pool. Needs `fee_recipient`.
+	#[serde(default)]
+	fee_wei: Option<String>,
+	/// EVM address the fee is paid to (for ARX-20, the token mints it there).
+	#[serde(default)]
+	fee_recipient: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -105,6 +139,11 @@ pub struct SpendRes {
 	mask_bits: u8,
 	expiry_block: u32,
 	amount_wei: String,
+	/// Relayer fee the proofs are bound to, `"0"` when unrelayed.
+	fee_wei: String,
+	/// Account the fee goes to, absent when unrelayed.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	fee_recipient: Option<String>,
 	inputs: Vec<InputJson>,
 	outputs: Vec<OutputJson>,
 	proofs: ProofsJson,
@@ -177,17 +216,51 @@ fn parse_wei(s: &str) -> Result<u128, String> {
 	s.parse().map_err(|_| "amount_wei is not an integer".into())
 }
 
-fn to_units(wei: u128) -> Result<u64, String> {
-	if wei == 0 || wei % SHIELDED_UNIT != 0 {
-		return Err(
-			"amount must be a positive multiple of 1e9 base units (1 shielded unit)".into(),
-		);
+fn parse_unit(unit: Option<&str>) -> Result<u128, String> {
+	match unit.map(str::trim).filter(|s| !s.is_empty()) {
+		None => Ok(SHIELDED_UNIT),
+		Some(s) => match s.parse::<u128>() {
+			Ok(0) | Err(_) => Err("shielded_unit_wei must be a positive integer".into()),
+			Ok(unit) => Ok(unit),
+		},
 	}
-	u64::try_from(wei / SHIELDED_UNIT).map_err(|_| "amount too large".into())
 }
 
-fn wei_of(units: u64) -> String {
-	(units as u128 * SHIELDED_UNIT).to_string()
+fn to_units(wei: u128, unit: u128) -> Result<u64, String> {
+	if wei == 0 || wei % unit != 0 {
+		return Err(format!(
+			"amount must be a positive multiple of {unit} base units (1 shielded unit)"
+		));
+	}
+	u64::try_from(wei / unit).map_err(|_| "amount too large".into())
+}
+
+fn wei_of(units: u64, unit: u128) -> String {
+	(units as u128 * unit).to_string()
+}
+
+/// A relayer fee: shielded units and the 20-byte account it is paid to.
+#[derive(Clone, Copy)]
+struct Fee {
+	units: u64,
+	recipient: [u8; 20],
+}
+
+fn parse_fee(
+	fee_wei: Option<&str>,
+	recipient: Option<&str>,
+	unit: u128,
+) -> Result<Option<Fee>, String> {
+	let fee_wei = fee_wei.map(str::trim).filter(|s| !s.is_empty());
+	let recipient = recipient.map(str::trim).filter(|s| !s.is_empty());
+	match (fee_wei, recipient) {
+		(None, None) => Ok(None),
+		(Some(wei), Some(to)) => Ok(Some(Fee {
+			units: to_units(parse_wei(wei)?, unit)?,
+			recipient: parse_h160(to)?,
+		})),
+		_ => Err("fee_wei and fee_recipient go together".into()),
+	}
 }
 
 fn parse_h160(hex_in: &str) -> Result<[u8; 20], String> {
@@ -228,12 +301,12 @@ fn output_json(out: &OutputNote, mask: u8) -> OutputJson {
 	}
 }
 
-fn secrets_of(out: &OutputNote) -> NoteSecrets {
+fn secrets_of(out: &OutputNote, unit: u128) -> NoteSecrets {
 	NoteSecrets {
 		cm: hex_field(&out.cm_bytes()),
 		cv: hex_field(&out.cv_bytes()),
 		rho: hex_field(&fp_to_bytes(&out.note.rho)),
-		amount_wei: wei_of(out.note.amount),
+		amount_wei: wei_of(out.note.amount, unit),
 		pk_hex: hex_field(&fp_to_bytes(&out.note.pk)),
 	}
 }
@@ -264,8 +337,9 @@ pub fn shield(req: ShieldReq) -> Result<ShieldRes, String> {
 	if !is_valid_mask(req.mask_bits) {
 		return Err("mask_bits must be 0..=15".into());
 	}
+	let unit = parse_unit(req.shielded_unit_wei.as_deref())?;
 	let wei = parse_wei(&req.amount_wei)?;
-	let units = to_units(wei)?;
+	let units = to_units(wei, unit)?;
 	let mut rng = OsRng;
 	let sk = match req.sk_hex.as_deref() {
 		Some(h) if !h.is_empty() => parse_sk(h)?,
@@ -318,7 +392,7 @@ pub fn shield(req: ShieldReq) -> Result<ShieldRes, String> {
 		expiry_block: req.expiry_block,
 		outputs: vec![output_json(&out, req.mask_bits)],
 		proofs,
-		note: secrets_of(&out),
+		note: secrets_of(&out, unit),
 	})
 }
 
@@ -334,10 +408,11 @@ fn open_spend(
 	sk: SpendingKey,
 	req: &SpendNoteReq,
 	leaves: &[String],
+	unit: u128,
 	rng: &mut impl rand_core::RngCore,
 ) -> Result<(SpendNote, FieldBytes), String> {
 	let wei = parse_wei(&req.amount_wei)?;
-	let units = to_units(wei)?;
+	let units = to_units(wei, unit)?;
 	let rho = parse_fp(&req.rho)?;
 	let note = Note {
 		pk: sk.pk(),
@@ -371,7 +446,11 @@ fn prove_spend_bundle(
 	transparent_out: u64,
 	recipient: Option<&[u8]>,
 	token: Option<&str>,
+	fee: Option<Fee>,
+	unit: u128,
 ) -> Result<SpendRes, String> {
+	let fee_units = fee.map_or(0, |f| f.units);
+	let fee_recipient = fee.map(|f| f.recipient);
 	let nullifiers: Vec<FieldBytes> = spends.iter().map(|s| s.nullifier_bytes()).collect();
 	let commitments: Vec<FieldBytes> = outputs.iter().map(|o| o.cm_bytes()).collect();
 	let cv_inputs: Vec<FieldBytes> = spends.iter().map(|s| s.cv_bytes()).collect();
@@ -386,8 +465,8 @@ fn prove_spend_bundle(
 			recipient,
 			transparent_in,
 			transparent_out,
-			fee: 0,
-			fee_recipient: None,
+			fee: fee_units,
+			fee_recipient: fee_recipient.as_ref().map(|r| r.as_slice()),
 			nullifiers: &nullifiers,
 			commitments: &commitments,
 			cv_inputs: &cv_inputs,
@@ -404,7 +483,7 @@ fn prove_spend_bundle(
 		expiry_block,
 		transparent_in,
 		transparent_out,
-		fee: 0,
+		fee: fee_units,
 	};
 	let mut proofs = empty_proofs();
 	let spend_proof =
@@ -428,11 +507,16 @@ fn prove_spend_bundle(
 		anchor: hex_field(&anchor),
 		mask_bits: mask,
 		expiry_block,
-		amount_wei: wei_of(if transparent_out > 0 {
-			transparent_out
-		} else {
-			outputs.first().map(|o| o.note.amount).unwrap_or(0)
-		}),
+		amount_wei: wei_of(
+			if transparent_out > 0 {
+				transparent_out
+			} else {
+				outputs.first().map(|o| o.note.amount).unwrap_or(0)
+			},
+			unit,
+		),
+		fee_wei: wei_of(fee_units, unit),
+		fee_recipient: fee_recipient.map(|r| hex_bytes(&r)),
 		inputs: spends
 			.iter()
 			.map(|s| InputJson {
@@ -443,7 +527,7 @@ fn prove_spend_bundle(
 			.collect(),
 		outputs: outputs.iter().map(|o| output_json(o, mask)).collect(),
 		proofs,
-		notes: outputs.iter().map(secrets_of).collect(),
+		notes: outputs.iter().map(|o| secrets_of(o, unit)).collect(),
 	})
 }
 
@@ -451,15 +535,14 @@ pub fn transfer(req: TransferReq) -> Result<SpendRes, String> {
 	if !is_valid_mask(req.mask_bits) {
 		return Err("mask_bits must be 0..=15".into());
 	}
-	let pay_units = to_units(parse_wei(&req.amount_wei)?)?;
+	let unit = parse_unit(req.shielded_unit_wei.as_deref())?;
+	let fee = parse_fee(req.fee_wei.as_deref(), req.fee_recipient.as_deref(), unit)?;
+	let pay_units = to_units(parse_wei(&req.amount_wei)?, unit)?;
 	let sk = parse_sk(&req.sk_hex)?;
 	let recipient_pk = parse_fp(&req.recipient_pk)?;
 	let mut rng = OsRng;
-	let (spend, anchor) = open_spend(sk, &req.note, &req.leaves, &mut rng)?;
-	if pay_units > spend.note.amount {
-		return Err("amount is larger than the selected note".into());
-	}
-	let change = spend.note.amount - pay_units;
+	let (spend, anchor) = open_spend(sk, &req.note, &req.leaves, unit, &mut rng)?;
+	let change = change_of(spend.note.amount, pay_units, fee)?;
 	let paid = OutputNote::new(recipient_pk, pay_units, &mut rng);
 	let mut outputs = vec![paid];
 	if change > 0 {
@@ -475,6 +558,8 @@ pub fn transfer(req: TransferReq) -> Result<SpendRes, String> {
 		0,
 		None,
 		req.token.as_deref(),
+		fee,
+		unit,
 	)
 }
 
@@ -482,15 +567,19 @@ pub fn unshield(req: UnshieldReq) -> Result<SpendRes, String> {
 	if !is_valid_mask(req.mask_bits) {
 		return Err("mask_bits must be 0..=15".into());
 	}
-	let out_units = to_units(parse_wei(&req.amount_wei)?)?;
+	if hides_balance(req.mask_bits) {
+		return Err(
+			"a hide-balance bundle (mask bit 3) cannot unshield; pay privately instead".into(),
+		);
+	}
+	let unit = parse_unit(req.shielded_unit_wei.as_deref())?;
+	let fee = parse_fee(req.fee_wei.as_deref(), req.fee_recipient.as_deref(), unit)?;
+	let out_units = to_units(parse_wei(&req.amount_wei)?, unit)?;
 	let sk = parse_sk(&req.sk_hex)?;
 	let recipient = parse_h160(&req.recipient)?;
 	let mut rng = OsRng;
-	let (spend, anchor) = open_spend(sk, &req.note, &req.leaves, &mut rng)?;
-	if out_units > spend.note.amount {
-		return Err("amount is larger than the selected note".into());
-	}
-	let change = spend.note.amount - out_units;
+	let (spend, anchor) = open_spend(sk, &req.note, &req.leaves, unit, &mut rng)?;
+	let change = change_of(spend.note.amount, out_units, fee)?;
 	let mut outputs = Vec::new();
 	if change > 0 {
 		outputs.push(OutputNote::new(sk.pk(), change, &mut rng));
@@ -505,5 +594,76 @@ pub fn unshield(req: UnshieldReq) -> Result<SpendRes, String> {
 		out_units,
 		Some(&recipient),
 		req.token.as_deref(),
+		fee,
+		unit,
 	)
+}
+
+/// What stays in the sender's change note after the payment and the fee.
+fn change_of(note: u64, pay: u64, fee: Option<Fee>) -> Result<u64, String> {
+	pay.checked_add(fee.map_or(0, |f| f.units))
+		.and_then(|spent| note.checked_sub(spent))
+		.ok_or_else(|| "amount plus fee is larger than the selected note".into())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn unshield_req(extra: serde_json::Value) -> UnshieldReq {
+		let mut req = serde_json::json!({
+			"amount_wei": "40000000000",
+			"mask_bits": 0,
+			"expiry_block": 100,
+			"sk_hex": format!("0x01{}", "00".repeat(31)),
+			"recipient": format!("0x{}", "22".repeat(20)),
+			"note": { "amount_wei": "42000000000", "rho": format!("0x{}", "00".repeat(32)), "leaf_index": 0 },
+			"leaves": [],
+		});
+		if let (Some(base), Some(extra)) = (req.as_object_mut(), extra.as_object()) {
+			base.extend(extra.clone());
+		}
+		serde_json::from_value(req).expect("request shape")
+	}
+
+	#[test]
+	fn a_hide_balance_bundle_is_never_unshielded() {
+		let err = unshield(unshield_req(serde_json::json!({ "mask_bits": 0b1000 })))
+			.err()
+			.expect("refused");
+
+		assert!(err.contains("hide-balance"), "{err}");
+	}
+
+	#[test]
+	fn a_fee_needs_its_recipient() {
+		let err = unshield(unshield_req(serde_json::json!({ "fee_wei": "2000000000" })))
+			.err()
+			.expect("refused");
+
+		assert!(err.contains("go together"), "{err}");
+	}
+
+	#[test]
+	fn the_fee_comes_out_of_the_note_with_the_payment() {
+		let fee = Some(Fee {
+			units: 2,
+			recipient: [0x33; 20],
+		});
+
+		assert_eq!(change_of(42, 40, fee), Ok(0));
+		assert_eq!(change_of(42, 30, fee), Ok(10));
+		assert!(change_of(42, 41, fee).is_err());
+	}
+
+	#[test]
+	fn a_token_unit_scales_amounts() {
+		let six_decimals = parse_unit(Some("1")).unwrap();
+
+		assert_eq!(to_units(5, six_decimals), Ok(5));
+		assert_eq!(to_units(5, SHIELDED_UNIT).ok(), None);
+		assert_eq!(wei_of(5, six_decimals), "5");
+		assert!(parse_unit(Some("0")).is_err());
+		assert_eq!(parse_unit(None), Ok(SHIELDED_UNIT));
+	}
 }

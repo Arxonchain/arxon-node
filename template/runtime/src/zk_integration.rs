@@ -965,3 +965,117 @@ fn a_six_decimal_token_shields_in_its_own_unit() {
 		assert_eq!(NoteTree::leaf_count(TreeId::Note), 0);
 	});
 }
+
+// --- the wallet prover against the chain -----------------------------------------------------------
+
+fn json_bytes(v: &serde_json::Value) -> Vec<u8> {
+	hex::decode(v.as_str().expect("hex string").trim_start_matches("0x")).expect("hex")
+}
+
+fn json_field(v: &serde_json::Value) -> FieldBytes {
+	FieldBytes(json_bytes(v).try_into().expect("32 bytes"))
+}
+
+fn json_proof(v: &serde_json::Value) -> Option<Proof> {
+	let bytes = json_bytes(v);
+	(!bytes.is_empty()).then(|| proof_of(bytes))
+}
+
+fn json_bundle(res: &serde_json::Value) -> (Inputs, Outputs, ProofBundle) {
+	let empty = Vec::new();
+	let inputs = res["inputs"].as_array().unwrap_or(&empty).iter().map(|i| Input {
+		nullifier: json_field(&i["nullifier"]),
+		cv: json_field(&i["cv"]),
+		revealed_sender: json_field(&i["revealed_sender"]),
+	});
+	let outputs = res["outputs"].as_array().expect("outputs").iter().map(|o| Output {
+		cm: json_field(&o["cm"]),
+		cv: json_field(&o["cv"]),
+		revealed_receiver: json_field(&o["revealed_receiver"]),
+		revealed_amount: json_field(&o["revealed_amount"]),
+		encrypted_note: BoundedVec::truncate_from(json_bytes(&o["encrypted_note"])),
+	});
+	let p = &res["proofs"];
+	(
+		Inputs::truncate_from(inputs.collect()),
+		Outputs::truncate_from(outputs.collect()),
+		ProofBundle {
+			spend: json_proof(&p["spend"]),
+			output: json_proof(&p["output"]),
+			balance: json_proof(&p["balance"]).expect("balance proof"),
+			receipt: json_proof(&p["receipt"]),
+			compliance: json_proof(&p["compliance"]),
+		},
+	)
+}
+
+/// The local prover and the browser prover share `arxon_prove`: what it builds
+/// for a relayed unshield must verify on chain, fee row and fee recipient included.
+#[test]
+fn the_wallet_prover_builds_a_relayed_unshield_the_chain_accepts() {
+	dev_ext().execute_with(|| {
+		let shield: serde_json::Value = serde_json::to_value(
+			arxon_prove::shield(
+				serde_json::from_value(serde_json::json!({
+					"amount_wei": units(42).to_string(),
+					"mask_bits": 0,
+					"expiry_block": EXPIRY,
+				}))
+				.unwrap(),
+			)
+			.expect("shield proved"),
+		)
+		.unwrap();
+		let (_, outputs, proofs) = json_bundle(&shield);
+		assert_ok!(Privacy::shield(
+			RuntimeOrigin::signed(alith()),
+			units(42),
+			outputs,
+			0,
+			EXPIRY,
+			proofs
+		));
+
+		let unshield: serde_json::Value = serde_json::to_value(
+			arxon_prove::unshield(
+				serde_json::from_value(serde_json::json!({
+					"amount_wei": units(40).to_string(),
+					"mask_bits": 0,
+					"expiry_block": EXPIRY,
+					"sk_hex": shield["sk_hex"],
+					"recipient": format!("0x{}", hex::encode(sp_core::H160::from(baltathar()).0)),
+					"note": {
+						"amount_wei": shield["note"]["amount_wei"],
+						"rho": shield["note"]["rho"],
+						"leaf_index": 0,
+					},
+					"leaves": [shield["note"]["cm"]],
+					"fee_wei": units(2).to_string(),
+					"fee_recipient": format!("0x{}", hex::encode(sp_core::H160::from(charleth()).0)),
+				}))
+				.unwrap(),
+			)
+			.expect("unshield proved"),
+		)
+		.unwrap();
+		assert_eq!(unshield["fee_wei"], units(2).to_string());
+		let (inputs, outputs, proofs) = json_bundle(&unshield);
+		let charleth_before = Balances::balance(&charleth());
+
+		assert_ok!(Privacy::unshield_with_fee(
+			RuntimeOrigin::signed(charleth()),
+			baltathar(),
+			units(40),
+			json_field(&unshield["anchor"]),
+			inputs,
+			outputs,
+			0,
+			EXPIRY,
+			relay_fee(2, charleth()),
+			proofs,
+		));
+
+		assert_eq!(Balances::balance(&charleth()), charleth_before + units(2));
+		assert_eq!(Privacy::pool_balance(), 0);
+	});
+}

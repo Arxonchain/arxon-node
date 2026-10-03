@@ -17,9 +17,9 @@
 //! code is stored; it fixes the shielded unit (`10^(decimals - 9)` base units,
 //! 1 for 9 decimals or fewer) once, while the pool is empty.
 //!
-//! The `WithFee` variants bind a relayer fee in token units into the proofs.
-//! The pool records it; the token mints it to `feeRecipient`, like the
-//! unshielded amount.
+//! The `WithFee` variants bind a relayer fee `(recipient, amount)` in token
+//! base units into the proofs. The pool records it; the token mints it to the
+//! fee recipient, like the unshielded amount.
 
 use alloc::vec::Vec;
 use core::marker::PhantomData;
@@ -37,7 +37,7 @@ use sp_runtime::{traits::Dispatchable, SaturatedConversion};
 use crate::submit::{
 	ensure_direct_call, ensure_no_value, signed_origin, to_balance, to_block_number, to_compliance,
 	to_inputs, to_outputs, to_proofs, to_ptr, to_relay_fee, AbiInputs, AbiOptionalAttachment,
-	AbiOutputs, AbiProofs,
+	AbiOutputs, AbiProofs, AbiRelayFee,
 };
 use crate::LEAF_READ_BYTES;
 
@@ -169,9 +169,9 @@ where
 		Ok(())
 	}
 
-	/// [`Self::unshield`] with a relayer fee the token mints to `feeRecipient`.
+	/// [`Self::unshield`] with a relayer fee the token mints to `fee.recipient`.
 	#[precompile::public(
-		"unshieldWithFee(address,uint256,bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,address,uint256,(bytes,bytes,bytes,bytes,bytes))"
+		"unshieldWithFee(address,uint256,bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(address,uint256),(bytes,bytes,bytes,bytes,bytes))"
 	)]
 	fn unshield_with_fee(
 		handle: &mut impl PrecompileHandle,
@@ -182,8 +182,7 @@ where
 		outputs: AbiOutputs,
 		mask_bits: u8,
 		expiry_block: U256,
-		fee_recipient: Address,
-		fee: U256,
+		fee: AbiRelayFee,
 		proofs: AbiProofs,
 	) -> EvmResult {
 		ensure_direct_call(handle)?;
@@ -202,7 +201,7 @@ where
 				outputs: to_outputs(outputs)?,
 				mask_bits,
 				expiry_block: to_block_number::<R>(expiry_block)?,
-				fee: to_relay_fee::<R>(fee_recipient, fee)?,
+				fee: to_relay_fee::<R>(fee)?,
 				proofs: to_proofs(proofs)?,
 			},
 			0,
@@ -210,9 +209,9 @@ where
 		Ok(())
 	}
 
-	/// [`Self::submit_private_transfer`] with a relayer fee the token mints to `feeRecipient`.
+	/// [`Self::submit_private_transfer`] with a relayer fee the token mints to `fee.recipient`.
 	#[precompile::public(
-		"submitPrivateTransferWithFee(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),address,uint256,(bytes,bytes,bytes,bytes,bytes))"
+		"submitPrivateTransferWithFee(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),(address,uint256),(bytes,bytes,bytes,bytes,bytes))"
 	)]
 	fn submit_private_transfer_with_fee(
 		handle: &mut impl PrecompileHandle,
@@ -223,8 +222,7 @@ where
 		expiry_block: U256,
 		ptr: AbiOptionalAttachment,
 		compliance: AbiOptionalAttachment,
-		fee_recipient: Address,
-		fee: U256,
+		fee: AbiRelayFee,
 		proofs: AbiProofs,
 	) -> EvmResult {
 		ensure_direct_call(handle)?;
@@ -242,7 +240,7 @@ where
 				expiry_block: to_block_number::<R>(expiry_block)?,
 				ptr: to_ptr(ptr)?,
 				compliance: to_compliance(compliance)?,
-				fee: to_relay_fee::<R>(fee_recipient, fee)?,
+				fee: to_relay_fee::<R>(fee)?,
 				proofs: to_proofs(proofs)?,
 			},
 			0,

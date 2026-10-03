@@ -27,7 +27,7 @@ fn hex_root(root: FieldBytes) -> String {
 /// Naive oracle: root of `leaves` padded with empty leaves to the tree's depth.
 fn reference_root(tree: TreeId, leaves: &[FieldBytes]) -> FieldBytes {
 	let (hash, depth): (fn(Fp, Fp) -> Fp, usize) = match tree {
-		TreeId::Note => (hash_merkle_note, NOTE_TREE_DEPTH),
+		TreeId::Note | TreeId::Arx20(_) => (hash_merkle_note, NOTE_TREE_DEPTH),
 		TreeId::Membership => (hash_merkle_member, MEMBER_TREE_DEPTH),
 	};
 	let mut empty = Fp::from(0);
@@ -191,6 +191,20 @@ fn the_two_trees_are_independent() {
 			MEMBER_EMPTY_ROOT
 		);
 		assert_ok!(NoteTree::insert(TreeId::Membership, &leaf(1)), 0);
+	});
+}
+
+#[test]
+fn an_arx20_tree_does_not_touch_the_native_note_tree() {
+	new_test_ext().execute_with(|| {
+		let token = TreeId::Arx20(sp_core::H160::from_low_u64_be(0xA20));
+		assert_ok!(NoteTree::insert(token, &leaf(1)));
+
+		assert_eq!(NoteTree::leaf_count(TreeId::Note), 0);
+		assert_eq!(hex_root(NoteTree::root(TreeId::Note)), NOTE_EMPTY_ROOT);
+		assert!(NoteTree::contains_leaf(token, &leaf(1)));
+		assert!(!NoteTree::contains_leaf(TreeId::Note, &leaf(1)));
+		assert_eq!(NoteTree::root(token), reference_root(token, &[leaf(1)]));
 	});
 }
 

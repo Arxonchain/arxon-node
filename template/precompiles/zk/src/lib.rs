@@ -4,6 +4,7 @@
 //! engineer briefing lists it: **view only**. Solidity contracts and MetaMask
 //! users read the same nullifier set, tree roots and verifier the native path
 //! writes to; no method here changes state. Submission is [`submit`] at `0x801`.
+//! ARX-20 tokens use [`arx20`] at `0x802` (isolated trees; native ARX unchanged).
 //!
 //! ABI (`bytes32` values are canonical little-endian Pallas base field
 //! elements, the same bytes the native extrinsics use):
@@ -41,6 +42,7 @@ use precompile_utils::prelude::*;
 use scale_codec::MaxEncodedLen;
 use sp_core::{H256, U256};
 
+pub mod arx20;
 pub mod submit;
 
 #[cfg(test)]
@@ -48,6 +50,7 @@ mod mock;
 #[cfg(test)]
 mod tests;
 
+pub use arx20::{ArxonArx20Precompile, ARX20_ADDRESS};
 pub use submit::{ArxonZkSubmitPrecompile, SUBMIT_ADDRESS};
 
 /// Address of this precompile (reserved by the runtime as `ARXON_ZK_PRECOMPILE`).

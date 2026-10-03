@@ -119,3 +119,30 @@ fn nullifier_set_trait_delegates_to_the_pallet() {
 		assert!(<NullifierRegistry as NullifierSet>::is_spent(&nf(3)));
 	});
 }
+
+#[test]
+fn an_arx20_spend_does_not_mark_the_native_nullifier() {
+	new_test_ext().execute_with(|| {
+		let token = sp_core::H160::from_low_u64_be(0xA20);
+		assert_ok!(NullifierRegistry::mark_spent_asset(token, &nf(1)));
+
+		assert!(NullifierRegistry::is_spent_asset(token, &nf(1)));
+		assert!(!NullifierRegistry::is_spent(&nf(1)));
+		assert!(!NullifierRegistry::is_spent_asset(
+			sp_core::H160::from_low_u64_be(0xB20),
+			&nf(1)
+		));
+	});
+}
+
+#[test]
+fn native_and_arx20_can_share_the_same_nullifier_bytes() {
+	new_test_ext().execute_with(|| {
+		let token = sp_core::H160::from_low_u64_be(0xA20);
+		assert_ok!(NullifierRegistry::mark_spent(&nf(7)));
+		assert_ok!(NullifierRegistry::mark_spent_asset(token, &nf(7)));
+
+		assert!(NullifierRegistry::is_spent(&nf(7)));
+		assert!(NullifierRegistry::is_spent_asset(token, &nf(7)));
+	});
+}

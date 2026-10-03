@@ -1,5 +1,6 @@
 use crate::{
-	bundle_digest, digest_to_field, encrypted_notes_hash, BundleFields, FieldBytes, CHAIN_ID,
+	arx20_bundle_digest, bundle_digest, digest_to_field, encrypted_notes_hash, BundleFields,
+	FieldBytes, CHAIN_ID,
 };
 
 fn fb(byte: u8) -> FieldBytes {
@@ -202,4 +203,24 @@ fn bundle_digest_changes_when_a_compliance_attestation_is_attached_or_rerooted()
 
 	assert_ne!(bundle_digest(&bare), bundle_digest(&with_compliance));
 	assert_ne!(bundle_digest(&with_compliance), bundle_digest(&other_root));
+}
+
+#[test]
+fn arx20_bundle_digest_differs_from_native_and_binds_the_token() {
+	let fields = base(&[], &[]);
+	let token_a = [0x11u8; 20];
+	let token_b = [0x22u8; 20];
+
+	let native = bundle_digest(&fields);
+	let a = arx20_bundle_digest(&token_a, &fields);
+	let b = arx20_bundle_digest(&token_b, &fields);
+
+	assert_ne!(native, a);
+	assert_ne!(a, b);
+	assert!(a.is_canonical());
+	assert_eq!(a.0[31], 0);
+	assert_eq!(
+		arx20_bundle_digest(&token_a, &fields),
+		arx20_bundle_digest(&token_a, &fields)
+	);
 }

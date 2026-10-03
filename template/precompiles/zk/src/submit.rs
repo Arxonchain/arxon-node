@@ -209,7 +209,7 @@ where
 	}
 }
 
-fn ensure_no_value(handle: &impl PrecompileHandle) -> EvmResult {
+pub(crate) fn ensure_no_value(handle: &impl PrecompileHandle) -> EvmResult {
 	if handle.context().apparent_value != U256::zero() {
 		Err(revert("precompile does not accept value"))
 	} else {
@@ -232,7 +232,7 @@ where
 	Ok(())
 }
 
-fn signed_origin<R>(
+pub(crate) fn signed_origin<R>(
 	handle: &impl PrecompileHandle,
 ) -> <R::RuntimeCall as Dispatchable>::RuntimeOrigin
 where
@@ -243,7 +243,7 @@ where
 	RawOrigin::Signed(who).into()
 }
 
-fn to_balance<R>(amount: U256) -> EvmResult<pallet_privacy::BalanceOf<R>>
+pub(crate) fn to_balance<R>(amount: U256) -> EvmResult<pallet_privacy::BalanceOf<R>>
 where
 	R: pallet_privacy::Config,
 	pallet_privacy::BalanceOf<R>: TryFrom<u128>,
@@ -252,7 +252,7 @@ where
 	amount.try_into().map_err(|_| revert("amount overflow"))
 }
 
-fn to_block_number<R>(n: U256) -> EvmResult<frame_system::pallet_prelude::BlockNumberFor<R>>
+pub(crate) fn to_block_number<R>(n: U256) -> EvmResult<frame_system::pallet_prelude::BlockNumberFor<R>>
 where
 	R: frame_system::Config,
 	frame_system::pallet_prelude::BlockNumberFor<R>: TryFrom<u128>,
@@ -261,7 +261,7 @@ where
 	n.try_into().map_err(|_| revert("expiry overflow"))
 }
 
-fn to_outputs(outputs: AbiOutputs) -> EvmResult<Outputs> {
+pub(crate) fn to_outputs(outputs: AbiOutputs) -> EvmResult<Outputs> {
 	let items: Vec<AbiOutput> = outputs.into();
 	let mut out = Vec::with_capacity(items.len());
 	for o in items {
@@ -277,7 +277,7 @@ fn to_outputs(outputs: AbiOutputs) -> EvmResult<Outputs> {
 	Outputs::try_from(out).map_err(|_| revert("too many outputs"))
 }
 
-fn to_inputs(inputs: AbiInputs) -> EvmResult<Inputs> {
+pub(crate) fn to_inputs(inputs: AbiInputs) -> EvmResult<Inputs> {
 	let items: Vec<AbiInput> = inputs.into();
 	let mut out = Vec::with_capacity(items.len());
 	for i in items {
@@ -290,7 +290,7 @@ fn to_inputs(inputs: AbiInputs) -> EvmResult<Inputs> {
 	Inputs::try_from(out).map_err(|_| revert("too many inputs"))
 }
 
-fn to_proofs(proofs: AbiProofs) -> EvmResult<ProofBundle> {
+pub(crate) fn to_proofs(proofs: AbiProofs) -> EvmResult<ProofBundle> {
 	Ok(ProofBundle {
 		spend: optional_proof(&proofs.spend, "spend proof")?,
 		output: optional_proof(&proofs.output, "output proof")?,
@@ -322,7 +322,7 @@ fn required_proof(
 		.map_err(|_| revert(alloc::format!("{field} too large")))
 }
 
-fn to_ptr(att: AbiOptionalAttachment) -> EvmResult<Option<PtrAttachment>> {
+pub(crate) fn to_ptr(att: AbiOptionalAttachment) -> EvmResult<Option<PtrAttachment>> {
 	if !att.present {
 		return Ok(None);
 	}
@@ -332,7 +332,7 @@ fn to_ptr(att: AbiOptionalAttachment) -> EvmResult<Option<PtrAttachment>> {
 	}))
 }
 
-fn to_compliance(att: AbiOptionalAttachment) -> EvmResult<Option<ComplianceAttachment>> {
+pub(crate) fn to_compliance(att: AbiOptionalAttachment) -> EvmResult<Option<ComplianceAttachment>> {
 	if !att.present {
 		return Ok(None);
 	}

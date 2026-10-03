@@ -70,7 +70,7 @@ pub use pallet_balances::Call as BalancesCall;
 pub use pallet_timestamp::Call as TimestampCall;
 
 use precompiles::FrontierPrecompiles;
-pub use precompiles::{ARXON_ZK_PRECOMPILE, ARXON_ZK_SUBMIT_PRECOMPILE};
+pub use precompiles::{ARXON_ARX20_PRECOMPILE, ARXON_ZK_PRECOMPILE, ARXON_ZK_SUBMIT_PRECOMPILE};
 
 /// Type of block number.
 pub type BlockNumber = u32;
@@ -555,7 +555,7 @@ mod runtime {
 	#[runtime::pallet_index(19)]
 	pub type NullifierRegistry = pallet_nullifier_registry;
 
-	// One pallet, two trees (TreeId::Note, TreeId::Membership).
+	// Note + Membership at genesis; ARX-20 trees are created per token on first insert.
 	#[runtime::pallet_index(20)]
 	pub type NoteTree = pallet_note_tree;
 }
@@ -1240,6 +1240,7 @@ impl pallet_privacy::Config for Runtime {
 	type Nullifiers = NullifierRegistry;
 	type Trees = NoteTree;
 	type Receipts = PTR;
+	type TokenToAccount = pallet_privacy::FromH160;
 	type WeightInfo = pallet_privacy::weights::SubstrateWeight<Runtime>;
 }
 

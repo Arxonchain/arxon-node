@@ -1,0 +1,21 @@
+[package]
+name = "arxon-prove-wasm"
+version = "0.1.0"
+license = "Unlicense"
+description = "Browser WASM of arxon-prove (same JSON as POST /v1/*)."
+authors = { workspace = true }
+edition = { workspace = true }
+repository = { workspace = true }
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+arxon-prove = { path = "../zk-prover", default-features = false }
+serde = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }
+wasm-bindgen = "0.2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }

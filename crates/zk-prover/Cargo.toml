@@ -1,0 +1,29 @@
+[package]
+name = "arxon-prove"
+version = "0.1.0"
+license = "Unlicense"
+description = "Local Halo2 prover for the Arxon wallet (shield, private transfer, unshield)."
+authors = { workspace = true }
+edition = { workspace = true }
+repository = { workspace = true }
+publish = false
+
+[[bin]]
+name = "arxon-prove"
+path = "src/main.rs"
+
+[lib]
+name = "arxon_prove"
+path = "src/lib.rs"
+
+[features]
+default = ["multicore"]
+multicore = ["arxon-zk/multicore"]
+
+[dependencies]
+arxon-zk = { workspace = true }
+arxon-zk-primitives = { workspace = true, features = ["std", "poseidon"] }
+hex = { workspace = true, features = ["alloc"] }
+rand_core = { workspace = true, features = ["getrandom"] }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }

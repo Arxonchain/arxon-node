@@ -14,6 +14,8 @@ use pallet_zk_verifier::ProofVerifier;
 use sp_runtime::BuildStorage;
 
 use crate::{self as pallet_privacy, ReceiptSink};
+use sp_core::H160;
+use sp_runtime::traits::Convert;
 
 pub type Balance = u128;
 pub type AccountId = u64;
@@ -167,13 +169,30 @@ impl pallet_privacy::Config for Test {
 	type Nullifiers = NullifierRegistry;
 	type Trees = NoteTree;
 	type Receipts = RecordingSink;
+	type TokenToAccount = TokenToU64;
 	type WeightInfo = ();
+}
+
+/// Last 8 bytes of the token address (tests use `H160::from_low_u64_be`).
+pub struct TokenToU64;
+
+impl Convert<H160, AccountId> for TokenToU64 {
+	fn convert(token: H160) -> AccountId {
+		let mut b = [0u8; 8];
+		b.copy_from_slice(&token.0[12..20]);
+		u64::from_be_bytes(b)
+	}
 }
 
 pub const ALICE: AccountId = 1;
 pub const BOB: AccountId = 2;
 pub const RELAYER: AccountId = 3;
+pub const TOKEN: AccountId = 99;
 pub const ALICE_BALANCE: Balance = 1_000 * UNIT;
+
+pub fn arx20_token() -> H160 {
+	H160::from_low_u64_be(TOKEN)
+}
 
 /// Externalities at block 1: Alice funded, every circuit enabled, fake verifier accepting.
 pub fn new_test_ext() -> sp_io::TestExternalities {

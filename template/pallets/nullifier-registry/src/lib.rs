@@ -10,6 +10,10 @@
 //! Storage uses `Blake2_128Concat`, not `Identity`: the prover chooses the
 //! preimage of a nullifier, so an attacker could otherwise grind key prefixes
 //! and unbalance the storage trie.
+//!
+//! Native ARX uses [`SpentNullifiers`]. Each ARX-20 token has its own spent set
+//! so a spend on one asset cannot nullify a note of another (notes share
+//! `H_NOTE(pk, amount, rho)` with no asset id).
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -25,17 +29,29 @@ mod tests;
 
 /// The spent set as seen by the pallets that consume it.
 pub trait NullifierSet {
-	/// `true` iff `nullifier` was already spent.
+	/// `true` iff `nullifier` was already spent in the native ARX pool.
 	fn is_spent(nullifier: &arxon_zk_primitives::FieldBytes) -> bool;
 
-	/// Marks `nullifier` spent. Fails if it already was; the caller's
-	/// transaction is expected to roll back.
+	/// Marks `nullifier` spent in the native ARX pool. Fails if it already was;
+	/// the caller's transaction is expected to roll back.
 	fn mark_spent(
 		nullifier: &arxon_zk_primitives::FieldBytes,
 	) -> frame_support::pallet_prelude::DispatchResult;
 
 	/// Weight of one [`Self::mark_spent`], for consumers' weight functions.
 	fn mark_spent_weight() -> frame_support::weights::Weight;
+
+	/// `true` iff `nullifier` was spent for `asset` (`None` = native ARX).
+	fn is_spent_for(
+		asset: Option<sp_core::H160>,
+		nullifier: &arxon_zk_primitives::FieldBytes,
+	) -> bool;
+
+	/// Marks `nullifier` spent for `asset` (`None` = native ARX).
+	fn mark_spent_for(
+		asset: Option<sp_core::H160>,
+		nullifier: &arxon_zk_primitives::FieldBytes,
+	) -> frame_support::pallet_prelude::DispatchResult;
 }
 
 #[frame_support::pallet]
@@ -43,6 +59,7 @@ pub mod pallet {
 	use arxon_zk_primitives::FieldBytes;
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
+	use sp_core::H160;
 
 	use super::{weights::WeightInfo, NullifierSet};
 
@@ -64,11 +81,36 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type SpentCount<T: Config> = StorageValue<_, u64, ValueQuery>;
 
+	/// Spent ARX-20 nullifiers: `(token, nullifier) → block`.
+	#[pallet::storage]
+	pub type SpentAssetNullifiers<T: Config> = StorageDoubleMap<
+		_,
+		Blake2_128Concat,
+		H160,
+		Blake2_128Concat,
+		FieldBytes,
+		BlockNumberFor<T>,
+		OptionQuery,
+	>;
+
+	/// Number of nullifiers spent per ARX-20 token.
+	#[pallet::storage]
+	pub type AssetSpentCount<T: Config> = StorageMap<_, Blake2_128Concat, H160, u64, ValueQuery>;
+
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// A note was spent.
 		NullifierSpent {
+			/// The nullifier.
+			nullifier: FieldBytes,
+			/// Block in which it was spent.
+			block_number: BlockNumberFor<T>,
+		},
+		/// An ARX-20 note was spent.
+		AssetNullifierSpent {
+			/// ARX-20 contract.
+			token: H160,
 			/// The nullifier.
 			nullifier: FieldBytes,
 			/// Block in which it was spent.
@@ -110,6 +152,44 @@ pub mod pallet {
 		pub fn spent_at(nullifier: &FieldBytes) -> Option<BlockNumberFor<T>> {
 			SpentNullifiers::<T>::get(nullifier)
 		}
+
+		/// `true` iff `nullifier` was spent for ARX-20 `token`.
+		pub fn is_spent_asset(token: H160, nullifier: &FieldBytes) -> bool {
+			SpentAssetNullifiers::<T>::contains_key(token, nullifier)
+		}
+
+		/// Marks `nullifier` spent for ARX-20 `token` in the current block.
+		pub fn mark_spent_asset(token: H160, nullifier: &FieldBytes) -> DispatchResult {
+			ensure!(!Self::is_spent_asset(token, nullifier), Error::<T>::AlreadySpent);
+			let count = AssetSpentCount::<T>::get(token)
+				.checked_add(1)
+				.ok_or(Error::<T>::Overflow)?;
+			let block_number = frame_system::Pallet::<T>::block_number();
+			SpentAssetNullifiers::<T>::insert(token, nullifier, block_number);
+			AssetSpentCount::<T>::insert(token, count);
+			Self::deposit_event(Event::AssetNullifierSpent {
+				token,
+				nullifier: *nullifier,
+				block_number,
+			});
+			Ok(())
+		}
+
+		/// `true` iff `nullifier` was spent for `asset` (`None` = native ARX).
+		pub fn is_spent_for(asset: Option<H160>, nullifier: &FieldBytes) -> bool {
+			match asset {
+				None => Self::is_spent(nullifier),
+				Some(token) => Self::is_spent_asset(token, nullifier),
+			}
+		}
+
+		/// Marks `nullifier` spent for `asset` (`None` = native ARX).
+		pub fn mark_spent_for(asset: Option<H160>, nullifier: &FieldBytes) -> DispatchResult {
+			match asset {
+				None => Self::mark_spent(nullifier),
+				Some(token) => Self::mark_spent_asset(token, nullifier),
+			}
+		}
 	}
 
 	impl<T: Config> NullifierSet for Pallet<T> {
@@ -123,6 +203,14 @@ pub mod pallet {
 
 		fn mark_spent_weight() -> Weight {
 			T::WeightInfo::mark_spent()
+		}
+
+		fn is_spent_for(asset: Option<H160>, nullifier: &FieldBytes) -> bool {
+			Pallet::<T>::is_spent_for(asset, nullifier)
+		}
+
+		fn mark_spent_for(asset: Option<H160>, nullifier: &FieldBytes) -> DispatchResult {
+			Pallet::<T>::mark_spent_for(asset, nullifier)
 		}
 	}
 }

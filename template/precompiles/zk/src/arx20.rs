@@ -1,0 +1,239 @@
+//! # Arxon ARX-20 precompile (`0x802`)
+//!
+//! Isolated shielded pool for issued ARX-20 tokens. Native ARX stays on
+//! `0x801` / `TreeId::Note`. Plain ERC-20 has no methods here.
+//!
+//! State-changing calls take the token from `msg.sender`: only the ARX-20
+//! contract can shield, unshield or privately transfer its own asset. The
+//! contract burns public balances before `shield` and mints after `unshield`.
+//! This precompile never moves native ARX. `msg.value` is rejected.
+//!
+//! View methods take the token address so wallets can query without
+//! impersonating the contract.
+
+use core::marker::PhantomData;
+
+use arxon_zk_primitives::FieldBytes;
+use frame_support::dispatch::{GetDispatchInfo, PostDispatchInfo};
+use frame_system::RawOrigin;
+use pallet_evm::AddressMapping;
+use pallet_note_tree::{MerkleTree, TreeId};
+use pallet_privacy::Call as PrivacyCall;
+use precompile_utils::prelude::*;
+use sp_core::{H160, H256, U256};
+use sp_runtime::traits::Dispatchable;
+
+use crate::submit::{
+	ensure_no_value, signed_origin, to_block_number, to_balance, to_compliance, to_inputs,
+	to_outputs, to_proofs, to_ptr, AbiInputs, AbiOptionalAttachment, AbiOutputs, AbiProofs,
+};
+
+/// Address of this precompile (reserved as `ARXON_ARX20_PRECOMPILE`).
+pub const ARX20_ADDRESS: u64 = 0x802;
+
+/// ARX-20 pool door, generic over the runtime.
+pub struct ArxonArx20Precompile<R>(PhantomData<R>);
+
+#[precompile_utils::precompile]
+impl<R> ArxonArx20Precompile<R>
+where
+	R: pallet_evm::Config
+		+ pallet_privacy::Config
+		+ pallet_note_tree::Config
+		+ pallet_nullifier_registry::Config
+		+ frame_system::Config<AccountId = pallet_evm::AccountIdOf<R>>,
+	R::RuntimeCall:
+		Dispatchable<PostInfo = PostDispatchInfo> + GetDispatchInfo + From<PrivacyCall<R>>,
+	<R::RuntimeCall as Dispatchable>::RuntimeOrigin: From<RawOrigin<pallet_evm::AccountIdOf<R>>>,
+	pallet_privacy::BalanceOf<R>: TryFrom<u128>,
+	frame_system::pallet_prelude::BlockNumberFor<R>: TryFrom<u128>,
+{
+	/// Burns are the token's job. This inserts notes into the caller's tree.
+	#[precompile::public(
+		"shield(uint256,(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bytes,bytes,bytes,bytes,bytes))"
+	)]
+	fn shield(
+		handle: &mut impl PrecompileHandle,
+		amount: U256,
+		outputs: AbiOutputs,
+		mask_bits: u8,
+		expiry_block: U256,
+		proofs: AbiProofs,
+	) -> EvmResult {
+		ensure_no_value(handle)?;
+		let token = caller_token(handle)?;
+		RuntimeHelper::<R>::try_dispatch(
+			handle,
+			signed_origin::<R>(handle),
+			PrivacyCall::<R>::shield_arx20 {
+				token,
+				amount: to_balance::<R>(amount)?,
+				outputs: to_outputs(outputs)?,
+				mask_bits,
+				expiry_block: to_block_number::<R>(expiry_block)?,
+				proofs: to_proofs(proofs)?,
+			},
+			0,
+		)?;
+		Ok(())
+	}
+
+	/// Spends notes of the caller token. The token mints after this returns.
+	#[precompile::public(
+		"unshield(address,uint256,bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bytes,bytes,bytes,bytes,bytes))"
+	)]
+	fn unshield(
+		handle: &mut impl PrecompileHandle,
+		recipient: Address,
+		amount: U256,
+		anchor: H256,
+		inputs: AbiInputs,
+		outputs: AbiOutputs,
+		mask_bits: u8,
+		expiry_block: U256,
+		proofs: AbiProofs,
+	) -> EvmResult {
+		ensure_no_value(handle)?;
+		let token = caller_token(handle)?;
+		let recipient = R::AddressMapping::into_account_id(recipient.into());
+		RuntimeHelper::<R>::try_dispatch(
+			handle,
+			signed_origin::<R>(handle),
+			PrivacyCall::<R>::unshield_arx20 {
+				token,
+				recipient,
+				amount: to_balance::<R>(amount)?,
+				anchor: FieldBytes(anchor.0),
+				inputs: to_inputs(inputs)?,
+				outputs: to_outputs(outputs)?,
+				mask_bits,
+				expiry_block: to_block_number::<R>(expiry_block)?,
+				proofs: to_proofs(proofs)?,
+			},
+			0,
+		)?;
+		Ok(())
+	}
+
+	/// Spends and creates notes inside the caller token's pool.
+	#[precompile::public(
+		"submitPrivateTransfer(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),(bytes,bytes,bytes,bytes,bytes))"
+	)]
+	fn submit_private_transfer(
+		handle: &mut impl PrecompileHandle,
+		anchor: H256,
+		inputs: AbiInputs,
+		outputs: AbiOutputs,
+		mask_bits: u8,
+		expiry_block: U256,
+		ptr: AbiOptionalAttachment,
+		compliance: AbiOptionalAttachment,
+		proofs: AbiProofs,
+	) -> EvmResult {
+		ensure_no_value(handle)?;
+		let token = caller_token(handle)?;
+		RuntimeHelper::<R>::try_dispatch(
+			handle,
+			signed_origin::<R>(handle),
+			PrivacyCall::<R>::submit_private_transfer_arx20 {
+				token,
+				anchor: FieldBytes(anchor.0),
+				inputs: to_inputs(inputs)?,
+				outputs: to_outputs(outputs)?,
+				mask_bits,
+				expiry_block: to_block_number::<R>(expiry_block)?,
+				ptr: to_ptr(ptr)?,
+				compliance: to_compliance(compliance)?,
+				proofs: to_proofs(proofs)?,
+			},
+			0,
+		)?;
+		Ok(())
+	}
+
+	/// Current root of `token`'s ARX-20 note tree.
+	#[precompile::public("getNoteTreeRoot(address)")]
+	#[precompile::view]
+	fn get_note_tree_root(
+		handle: &mut impl PrecompileHandle,
+		token: Address,
+	) -> EvmResult<H256> {
+		handle.record_db_read::<R>(32)?;
+		handle.record_db_read::<R>(32)?;
+		let tree = TreeId::Arx20(token.into());
+		Ok(H256(pallet_note_tree::Pallet::<R>::current_root(tree).0))
+	}
+
+	/// `true` iff `root` is a live anchor for `token`.
+	#[precompile::public("isKnownNoteRoot(address,bytes32)")]
+	#[precompile::view]
+	fn is_known_note_root(
+		handle: &mut impl PrecompileHandle,
+		token: Address,
+		root: H256,
+	) -> EvmResult<bool> {
+		handle.record_db_read::<R>(52)?;
+		Ok(pallet_note_tree::Pallet::<R>::is_known_root(
+			TreeId::Arx20(token.into()),
+			&FieldBytes(root.0),
+		))
+	}
+
+	/// `true` iff `nullifier` was spent for `token` (not the native ARX set).
+	#[precompile::public("isNullifierSpent(address,bytes32)")]
+	#[precompile::view]
+	fn is_nullifier_spent(
+		handle: &mut impl PrecompileHandle,
+		token: Address,
+		nullifier: H256,
+	) -> EvmResult<bool> {
+		handle.record_db_read::<R>(32)?;
+		Ok(pallet_nullifier_registry::Pallet::<R>::is_spent_asset(
+			token.into(),
+			&FieldBytes(nullifier.0),
+		))
+	}
+
+	/// Number of commitments in `token`'s tree.
+	#[precompile::public("getNoteLeafCount(address)")]
+	#[precompile::view]
+	fn get_note_leaf_count(
+		handle: &mut impl PrecompileHandle,
+		token: Address,
+	) -> EvmResult<U256> {
+		handle.record_db_read::<R>(8)?;
+		Ok(U256::from(pallet_note_tree::Pallet::<R>::leaf_count(
+			TreeId::Arx20(token.into()),
+		)))
+	}
+
+	/// Note commitment at `index` in `token`'s tree.
+	#[precompile::public("getNoteLeaf(address,uint256)")]
+	#[precompile::view]
+	fn get_note_leaf(
+		handle: &mut impl PrecompileHandle,
+		token: Address,
+		index: U256,
+	) -> EvmResult<H256> {
+		let tree = TreeId::Arx20(token.into());
+		let want = u64::try_from(index).map_err(|_| revert("leaf index"))?;
+		handle.record_db_read::<R>(8)?;
+		let count = pallet_note_tree::Pallet::<R>::leaf_count(tree);
+		if want >= count {
+			return Err(revert("unknown leaf"));
+		}
+		handle.record_db_read::<R>(48usize.saturating_mul(count.max(1) as usize))?;
+		match pallet_note_tree::Pallet::<R>::leaf_at(tree, want) {
+			Some(leaf) => Ok(H256(leaf.0)),
+			None => Err(revert("unknown leaf")),
+		}
+	}
+}
+
+fn caller_token(handle: &impl PrecompileHandle) -> EvmResult<H160> {
+	let token = handle.context().caller;
+	if token.is_zero() {
+		return Err(revert("token required"));
+	}
+	Ok(token)
+}

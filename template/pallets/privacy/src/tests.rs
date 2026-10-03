@@ -8,13 +8,13 @@ use sp_runtime::DispatchError;
 
 use crate::{
 	mock::{
-		new_test_ext, Balances, FakeVerifier, NoteTree, NullifierRegistry, Privacy, RecordingSink,
-		RuntimeCall, RuntimeEvent, RuntimeOrigin, System, Test, ALICE, ALICE_BALANCE, BOB, RELAYER,
-		UNIT,
+		new_test_ext, arx20_token, Balances, FakeVerifier, NoteTree, NullifierRegistry, Privacy,
+		RecordingSink, RuntimeCall, RuntimeEvent, RuntimeOrigin, System, Test, ALICE, ALICE_BALANCE,
+		BOB, RELAYER, TOKEN, UNIT,
 	},
 	pallet::{Intent, ValueFlow},
-	ComplianceAttachment, Error, Event, Input, Inputs, Output, Outputs, PrivacyMask, ProofBundle,
-	PtrAttachment, ShieldedTxCount, TxPrivacyMask,
+	ComplianceAttachment, Error, Event, Input, Inputs, Output, Outputs, PrivacyAsset, PrivacyMask,
+	ProofBundle, PtrAttachment, ShieldedTxCount, TxPrivacyMask,
 };
 
 // --- builders -----------------------------------------------------------------------------------
@@ -956,6 +956,7 @@ fn unshield_binds_recipient_and_transparent_out_into_the_digest() {
 	new_test_ext().execute_with(|| {
 		let anchor = shielded_note(1, 2);
 		let to_bob = Intent::<Test> {
+			asset: PrivacyAsset::Native,
 			anchor: Some(anchor),
 			inputs: inputs(vec![input(10, 11)]),
 			outputs: outputs(vec![]),
@@ -999,6 +1000,7 @@ fn unshield_binds_recipient_and_transparent_out_into_the_digest() {
 
 fn to_bob_clone(i: &Intent<Test>) -> Intent<Test> {
 	Intent {
+		asset: i.asset,
 		anchor: i.anchor,
 		inputs: i.inputs.clone(),
 		outputs: i.outputs.clone(),
@@ -1473,4 +1475,140 @@ fn retargeting_the_receipt_id_changes_the_digest_the_proofs_must_carry() {
 		digest_of_transfer_with(Some(ptr(0x50)), None),
 		digest_of_transfer_with(Some(ptr(0x51)), None)
 	);
+}
+
+fn shield_arx20(amount: u128, outs: Outputs, mask: u8) -> Result<(), DispatchError> {
+	Privacy::shield_arx20(
+		RuntimeOrigin::signed(TOKEN),
+		arx20_token(),
+		amount,
+		outs,
+		mask,
+		EXPIRY,
+		bundle(false, true),
+	)
+}
+
+#[test]
+fn shield_arx20_does_not_move_native_arx_or_the_native_tree() {
+	new_test_ext().execute_with(|| {
+		let pool_before = Privacy::pool_balance();
+		assert_ok!(shield_arx20(42 * UNIT, outputs(vec![output(1, 2)]), 0));
+
+		assert_eq!(Balances::balance(&ALICE), ALICE_BALANCE);
+		assert_eq!(Privacy::pool_balance(), pool_before);
+		assert_eq!(NoteTree::leaf_count(TreeId::Note), 0);
+		assert!(NoteTree::contains_leaf(
+			TreeId::Arx20(arx20_token()),
+			&fb(1)
+		));
+	});
+}
+
+#[test]
+fn shield_arx20_rejects_a_signer_that_is_not_the_token() {
+	new_test_ext().execute_with(|| {
+		assert_noop!(
+			Privacy::shield_arx20(
+				RuntimeOrigin::signed(ALICE),
+				arx20_token(),
+				42 * UNIT,
+				outputs(vec![output(1, 2)]),
+				0,
+				EXPIRY,
+				bundle(false, true),
+			),
+			Error::<Test>::OnlyArx20Token
+		);
+		assert_eq!(NoteTree::leaf_count(TreeId::Arx20(arx20_token())), 0);
+	});
+}
+
+#[test]
+fn a_native_anchor_is_unknown_on_an_arx20_unshield() {
+	new_test_ext().execute_with(|| {
+		let native_anchor = shielded_note(1, 2);
+
+		assert_noop!(
+			Privacy::unshield_arx20(
+				RuntimeOrigin::signed(TOKEN),
+				arx20_token(),
+				BOB,
+				42 * UNIT,
+				native_anchor,
+				inputs(vec![input(10, 11)]),
+				outputs(vec![]),
+				0,
+				EXPIRY,
+				bundle(true, false),
+			),
+			Error::<Test>::UnknownAnchor
+		);
+	});
+}
+
+#[test]
+fn arx20_unshield_does_not_pay_native_arx() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(shield_arx20(42 * UNIT, outputs(vec![output(1, 2)]), 0));
+		let tree = TreeId::Arx20(arx20_token());
+		let anchor = NoteTree::current_root(tree);
+		let bob_before = Balances::balance(&BOB);
+
+		assert_ok!(Privacy::unshield_arx20(
+			RuntimeOrigin::signed(TOKEN),
+			arx20_token(),
+			BOB,
+			42 * UNIT,
+			anchor,
+			inputs(vec![input(10, 11)]),
+			outputs(vec![]),
+			0,
+			EXPIRY,
+			bundle(true, false),
+		));
+
+		assert_eq!(Balances::balance(&BOB), bob_before);
+		assert!(NullifierRegistry::is_spent_asset(arx20_token(), &fb(10)));
+		assert!(!NullifierRegistry::is_spent(&fb(10)));
+	});
+}
+
+#[test]
+fn arx20_digest_differs_from_native_for_the_same_notes() {
+	new_test_ext().execute_with(|| {
+		let native = crate::pallet::Intent::<Test> {
+			asset: PrivacyAsset::Native,
+			anchor: None,
+			inputs: Inputs::default(),
+			outputs: outputs(vec![output(1, 2)]),
+			mask_bits: 0,
+			expiry_block: EXPIRY,
+			proofs: bundle(false, true),
+			ptr: None,
+			compliance: None,
+			value: ValueFlow::Shield {
+				depositor: TOKEN,
+				amount: 42 * UNIT,
+			},
+		};
+		let token = crate::pallet::Intent::<Test> {
+			asset: PrivacyAsset::Arx20(arx20_token()),
+			anchor: None,
+			inputs: Inputs::default(),
+			outputs: outputs(vec![output(1, 2)]),
+			mask_bits: 0,
+			expiry_block: EXPIRY,
+			proofs: bundle(false, true),
+			ptr: None,
+			compliance: None,
+			value: ValueFlow::Shield {
+				depositor: TOKEN,
+				amount: 42 * UNIT,
+			},
+		};
+		let n = Privacy::digest_of(&native, &Privacy::transparent_for_tests(&native));
+		let t = Privacy::digest_of(&token, &Privacy::transparent_for_tests(&token));
+		assert_ne!(n, t);
+	});
 }

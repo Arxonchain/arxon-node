@@ -2,7 +2,9 @@ use core::marker::PhantomData;
 use pallet_evm::{
 	IsPrecompileResult, Precompile, PrecompileHandle, PrecompileResult, PrecompileSet,
 };
-use pallet_evm_precompile_arxon_zk::{ArxonZkPrecompile, ArxonZkSubmitPrecompile};
+use pallet_evm_precompile_arxon_zk::{
+	ArxonArx20Precompile, ArxonZkPrecompile, ArxonZkSubmitPrecompile,
+};
 use sp_core::H160;
 
 use pallet_evm_precompile_curve25519 as curve25519_precompile;
@@ -15,6 +17,8 @@ use pallet_evm_precompile_simple::{ECRecover, ECRecoverPublicKey, Identity, Ripe
 pub const ARXON_ZK_PRECOMPILE: u64 = pallet_evm_precompile_arxon_zk::ADDRESS;
 /// Arxon ZK submission precompile: shield, unshield and private transfer.
 pub const ARXON_ZK_SUBMIT_PRECOMPILE: u64 = pallet_evm_precompile_arxon_zk::SUBMIT_ADDRESS;
+/// Arxon ARX-20 pool: per-token trees, never native ARX.
+pub const ARXON_ARX20_PRECOMPILE: u64 = pallet_evm_precompile_arxon_zk::ARX20_ADDRESS;
 
 pub struct FrontierPrecompiles<R>(PhantomData<R>);
 
@@ -25,7 +29,7 @@ where
 	pub fn new() -> Self {
 		Self(Default::default())
 	}
-	pub fn used_addresses() -> [H160; 11] {
+	pub fn used_addresses() -> [H160; 12] {
 		[
 			hash(1),
 			hash(2),
@@ -38,6 +42,7 @@ where
 			hash(1027),
 			hash(ARXON_ZK_PRECOMPILE),
 			hash(ARXON_ZK_SUBMIT_PRECOMPILE),
+			hash(ARXON_ARX20_PRECOMPILE),
 		]
 	}
 }
@@ -85,6 +90,9 @@ where
 			// Arxon ZK submit (same pallet_privacy path as the native extrinsics).
 			a if a == hash(ARXON_ZK_SUBMIT_PRECOMPILE) => {
 				Some(ArxonZkSubmitPrecompile::<R>::execute(handle))
+			}
+			a if a == hash(ARXON_ARX20_PRECOMPILE) => {
+				Some(ArxonArx20Precompile::<R>::execute(handle))
 			}
 			_ => None,
 		}

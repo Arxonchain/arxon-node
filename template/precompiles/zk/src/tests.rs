@@ -16,7 +16,7 @@ use sp_core::{H160, H256, U256};
 
 use crate::{
 	mock::{
-		new_test_ext, precompiles, FakeVerifier, NoteTree, NullifierRegistry, PCall, Privacy,
+		new_test_ext, precompiles, ACall, FakeVerifier, NoteTree, NullifierRegistry, PCall, Privacy,
 		Runtime, RuntimeOrigin, SCall, ZkVerifier, ALICE_BALANCE, UNIT,
 	},
 	submit::{
@@ -692,4 +692,125 @@ fn submit_selectors_match_the_documented_signatures() {
 			"submitPrivateTransfer(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),(bytes,bytes,bytes,bytes,bytes))"
 		)]
 	);
+}
+
+// --- 0x802 ARX-20 --------------------------------------------------------------------------------
+
+fn arx20_address() -> H160 {
+	H160::from_low_u64_be(crate::ARX20_ADDRESS)
+}
+
+fn token() -> H160 {
+	H160::from_low_u64_be(0xA20)
+}
+
+#[test]
+fn arx20_shield_writes_the_token_tree_not_native_arx() {
+	new_test_ext().execute_with(|| {
+		precompiles()
+			.prepare_test(
+				token(),
+				arx20_address(),
+				ACall::shield {
+					amount: U256::from(42 * UNIT),
+					outputs: abi_outputs(vec![abi_output(1, 2)]),
+					mask_bits: 0,
+					expiry_block: U256::from(EXPIRY),
+					proofs: abi_proofs(false, true),
+				},
+			)
+			.execute_returns(());
+
+		assert_eq!(NoteTree::leaf_count(TreeId::Note), 0);
+		assert!(NoteTree::contains_leaf(
+			TreeId::Arx20(token()),
+			&FieldBytes(h(1).0)
+		));
+		assert_eq!(Privacy::pool_balance(), 0);
+	});
+}
+
+#[test]
+fn arx20_get_note_tree_root_is_empty_until_shield() {
+	new_test_ext().execute_with(|| {
+		let empty = NoteTree::current_root(TreeId::Arx20(token()));
+		precompiles()
+			.prepare_test(
+				Alice,
+				arx20_address(),
+				ACall::get_note_tree_root {
+					token: Address(token()),
+				},
+			)
+			.execute_returns(H256(empty.0));
+	});
+}
+
+#[test]
+fn arx20_selectors_match_the_documented_signatures() {
+	assert_eq!(
+		ACall::shield_selectors(),
+		&[compute_selector(
+			"shield(uint256,(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bytes,bytes,bytes,bytes,bytes))"
+		)]
+	);
+	assert_eq!(
+		ACall::unshield_selectors(),
+		&[compute_selector(
+			"unshield(address,uint256,bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bytes,bytes,bytes,bytes,bytes))"
+		)]
+	);
+	assert_eq!(
+		ACall::submit_private_transfer_selectors(),
+		&[compute_selector(
+			"submitPrivateTransfer(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),(bytes,bytes,bytes,bytes,bytes))"
+		)]
+	);
+	assert_eq!(
+		ACall::get_note_leaf_count_selectors(),
+		&[compute_selector("getNoteLeafCount(address)")]
+	);
+	assert_eq!(
+		ACall::get_note_leaf_selectors(),
+		&[compute_selector("getNoteLeaf(address,uint256)")]
+	);
+}
+
+#[test]
+fn arx20_get_note_leaf_returns_inserted_commitment() {
+	new_test_ext().execute_with(|| {
+		precompiles()
+			.prepare_test(
+				token(),
+				arx20_address(),
+				ACall::shield {
+					amount: U256::from(42 * UNIT),
+					outputs: abi_outputs(vec![abi_output(1, 2)]),
+					mask_bits: 0,
+					expiry_block: U256::from(EXPIRY),
+					proofs: abi_proofs(false, true),
+				},
+			)
+			.execute_returns(());
+
+		precompiles()
+			.prepare_test(
+				Alice,
+				arx20_address(),
+				ACall::get_note_leaf_count {
+					token: Address(token()),
+				},
+			)
+			.execute_returns(U256::from(1u64));
+		precompiles()
+			.prepare_test(
+				Alice,
+				arx20_address(),
+				ACall::get_note_leaf {
+					token: Address(token()),
+					index: U256::zero(),
+				},
+			)
+			.execute_returns(h(1));
+	});
 }

@@ -284,11 +284,13 @@ The reference `ARX20(name, symbol, decimals, initialSupply)` fixes its unit in t
 
 ### Upgrading a running chain
 
-The testnet runs spec 1. Spec 2 carries versioned migrations that register the six circuits with their frozen hashes, build the empty subtree chains of both trees, and delete the old plaintext receipts and disclosure codes. They do nothing on a chain created with spec 2.
+The testnet started on spec 1 and runs spec 4. Spec 2 carries versioned migrations that register the six circuits with their frozen hashes, build the empty subtree chains of both trees, and delete the old plaintext receipts and disclosure codes. They do nothing on a chain created with spec 2.
 
 Spec 7 (hide balance, relayer fees, ARX-20 contract pools and units) carries one idempotent upgrade step: it stores a 5-byte placeholder code (`PUSH1 0 PUSH1 0 REVERT`, never executed) at `0x800`, `0x801` and `0x802`, as genesis now does. Solidity refuses to call a method without return values at an address without code, so before it no contract could call `0x801.setBalanceVisibility` or make `0x802.shield` / `unshield` calls, the reference ARX-20 included. Its new storage (`HideBalancePending`, `Arx20Unit`, `ReceiptAsset`) starts empty, an account flagged before it keeps its flag in force at once, and an ARX-20 that never fixes its unit keeps 10^9. It adds calls 10 to 14 of `pallet-privacy` without changing the existing ones (`transaction_version` stays 2), but it adds an `asset` field to the pool and receipt events: indexers that decode events by position must update. `ArxonZkApi` moves to version 3. The reference `ARX20` constructor gains a `decimals` argument.
 
-Roll the new `arxon-node` binary out to every validator and full node **before** `set_code`. The runtime imports the `verify_halo2_ipa` host function, and an old binary stalls at the first block that verifies a proof.
+The testnet upgrade from spec 4 to 7, rehearsed with the production binary, is in [`deploy/UPGRADE.md`](deploy/UPGRADE.md); what the wallets change is in [`crates/zk-prover/WALLET_INTEGRATION.md`](crates/zk-prover/WALLET_INTEGRATION.md).
+
+Spec 2 needed the new `arxon-node` binary on every validator and full node **before** `set_code`: it imports the `verify_halo2_ipa` host function, and an older binary stalls at the first block that verifies a proof. Spec 7 adds no host function, so the runtime goes first and the binary after (the order rehearsed).
 
 ### Testing
 

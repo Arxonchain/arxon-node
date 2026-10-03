@@ -6,6 +6,8 @@ Wants=network-online.target arxon-node.service
 [Service]
 Type=simple
 User=root
+# Optional RELAYER_* settings (see relayer.py), one VAR=value per line.
+EnvironmentFile=-/root/relayer.env
 ExecStartPre=/bin/sleep 2
 ExecStart=/bin/sh /root/run-relayer
 Restart=always

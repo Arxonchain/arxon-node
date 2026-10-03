@@ -125,7 +125,7 @@ where
 			if let Err(drifted) = arxon_zk::key_cache::warm_up() {
 				log::error!(
 					"Verifying keys of {drifted:?} do not match their frozen hashes: this node \
-					 rejects every proof of those circuits. Rebuild it from a release tree."
+					rejects every proof of those circuits. Rebuild it from a release tree."
 				);
 			}
 		});

@@ -159,9 +159,9 @@ pub mod pallet {
 		/// Signed message: ARXON_QUANTUM_DOMAIN || SCALE(nonce) || SCALE(call)
 		#[pallet::call_index(2)]
 		#[pallet::weight({
-            let call_weight = call.get_dispatch_info().call_weight;
-            Weight::from_parts(300_000_000, 65536).saturating_add(call_weight)
-        })]
+			let call_weight = call.get_dispatch_info().call_weight;
+			Weight::from_parts(300_000_000, 65536).saturating_add(call_weight)
+		})]
 		pub fn quantum_dispatch(
 			origin: OriginFor<T>,
 			quantum_signer: T::AccountId,

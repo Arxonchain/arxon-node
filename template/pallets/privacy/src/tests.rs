@@ -1956,10 +1956,11 @@ fn an_account_that_hides_its_balance_cannot_sign_an_unshield() {
 	});
 }
 
-/// Circuit 3 forces a revealed sender to be the spent note's owner, so a
-/// revealed sender registered to a flagged account is that account spending.
+/// Key registration is first come, first served: anyone could register a
+/// victim's public key to a flagged account. Revealed keys are therefore not
+/// checked against flags, or the victim's unshields could be blocked at will.
 #[test]
-fn a_revealed_sender_that_hides_its_balance_cannot_unshield() {
+fn a_revealed_key_registered_to_a_flagged_account_does_not_block_an_unshield() {
 	new_test_ext().execute_with(|| {
 		let anchor = shielded_note(1, 2);
 		assert_ok!(Privacy::register_shielded_key(
@@ -1968,26 +1969,93 @@ fn a_revealed_sender_that_hides_its_balance_cannot_unshield() {
 		));
 		flag(ALICE);
 
+		assert_ok!(unshield_masked(RELAYER, BOB, anchor, 0));
+	});
+}
+
+#[test]
+fn a_relayer_fee_is_never_paid_to_an_account_that_hides_its_balance() {
+	new_test_ext().execute_with(|| {
+		let anchor = shielded_note(1, 2);
+		flag(ALICE);
+
 		assert_noop!(
-			unshield_masked(RELAYER, BOB, anchor, 0),
-			Error::<Test>::SenderHidesBalance
+			transfer_with_fee(
+				anchor,
+				RelayFee {
+					amount: 2 * UNIT,
+					recipient: ALICE
+				}
+			),
+			Error::<Test>::RecipientHidesBalance
 		);
 	});
 }
 
-/// The documented limit: with the sender hidden the chain cannot tell whose
-/// notes are spent, so only the owner's wallet (which sets bit 3) applies the rule.
 #[test]
-fn a_hidden_sender_is_not_checked_against_the_flag() {
+fn turning_hide_balance_on_and_off_inside_the_window_never_hides_it() {
 	new_test_ext().execute_with(|| {
-		let anchor = shielded_note(1, 2);
-		assert_ok!(Privacy::register_shielded_key(
+		assert_ok!(Privacy::set_balance_visibility(
 			RuntimeOrigin::signed(ALICE),
-			fb(0xa0)
+			true
 		));
-		flag(ALICE);
 
-		assert_ok!(unshield_masked(RELAYER, BOB, anchor, 0b0001));
+		assert_ok!(Privacy::set_balance_visibility(
+			RuntimeOrigin::signed(ALICE),
+			false
+		));
+
+		System::assert_last_event(RuntimeEvent::Privacy(Event::BalanceVisibilitySet {
+			who: ALICE,
+			hidden: false,
+			effective_from: 1,
+		}));
+		assert!(!Privacy::is_balance_hidden(&ALICE));
+		System::set_block_number(1 + MAX_VALIDITY + 1);
+		assert!(!Privacy::is_balance_hidden(&ALICE));
+	});
+}
+
+/// A flagged recipient that turns the flag off and on again keeps it in force
+/// the whole time, so a relayer's dry run stays valid.
+#[test]
+fn turning_hide_balance_off_and_on_inside_the_window_keeps_it_hidden() {
+	new_test_ext().execute_with(|| {
+		flag(BOB);
+
+		assert_ok!(Privacy::set_balance_visibility(
+			RuntimeOrigin::signed(BOB),
+			false
+		));
+		assert_ok!(Privacy::set_balance_visibility(
+			RuntimeOrigin::signed(BOB),
+			true
+		));
+
+		assert!(Privacy::is_balance_hidden(&BOB));
+		System::set_block_number(1 + MAX_VALIDITY + 1);
+		assert!(Privacy::is_balance_hidden(&BOB));
+	});
+}
+
+#[test]
+fn a_change_after_the_previous_one_matured_waits_for_its_own_window() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(Privacy::set_balance_visibility(
+			RuntimeOrigin::signed(ALICE),
+			true
+		));
+		let matured = 1 + MAX_VALIDITY + 1;
+		System::set_block_number(matured);
+
+		assert_ok!(Privacy::set_balance_visibility(
+			RuntimeOrigin::signed(ALICE),
+			false
+		));
+
+		assert!(Privacy::is_balance_hidden(&ALICE));
+		System::set_block_number(matured + MAX_VALIDITY + 1);
+		assert!(!Privacy::is_balance_hidden(&ALICE));
 	});
 }
 

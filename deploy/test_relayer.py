@@ -7,7 +7,7 @@ import unittest
 from eth_abi import encode
 
 import relayer
-from relayer import SUBMIT, Config, check, parse_tokens, selector
+from relayer import SUBMIT, Config, check, checked, covers_gas, parse_tokens, selector
 
 PAYER = "0x3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0"
 OTHER = "0x798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc"
@@ -129,6 +129,19 @@ class TokenRelay(unittest.TestCase):
 		)
 		with self.assertRaisesRegex(ValueError, "only submits private transfers"):
 			check(config(), TOKEN, data)
+
+
+class GasCover(unittest.TestCase):
+	def test_the_relayed_fee_is_returned_with_the_target(self):
+		self.assertEqual(checked(config(), SUBMIT, unshield_with_fee(PAYER, MIN_FEE)), (SUBMIT, MIN_FEE))
+
+	def test_a_fee_free_bundle_has_no_fee(self):
+		data = calldata(relayer.NATIVE_METHODS, "unshield", [*UNSHIELD_HEAD, PROOFS])
+		self.assertEqual(checked(config(), SUBMIT, data), (SUBMIT, None))
+
+	def test_a_fee_must_pay_the_gas_it_costs(self):
+		self.assertTrue(covers_gas(fee=300_000 * 10**9, gas=300_000, gas_price=10**9))
+		self.assertFalse(covers_gas(fee=300_000 * 10**9 - 1, gas=300_000, gas_price=10**9))
 
 
 class TokenList(unittest.TestCase):

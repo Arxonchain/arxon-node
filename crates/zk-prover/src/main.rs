@@ -1,9 +1,12 @@
 //! Local HTTP front for [`arxon_prove`]. Listens on 127.0.0.1 only.
 //!
-//! * `POST /v1/keys` — spending key + shielded pk
-//! * `POST /v1/shield` — C1 + C2 deposit into a note this wallet owns
-//! * `POST /v1/transfer` — C3 + C1 + C2 note-to-note pay
-//! * `POST /v1/unshield` — C3 + C2 (and C1 if change) pay a public 0x
+//! * `POST /v1/keys`: spending key + shielded pk
+//! * `POST /v1/shield`: C1 + C2 deposit into a note this wallet owns
+//! * `POST /v1/transfer`: C3 + C1 + C2 note-to-note pay
+//! * `POST /v1/unshield`: C3 + C2 (and C1 if change) pay a public 0x
+//!
+//! Transfers and unshields take `fee_wei` and `fee_recipient` when a relayer
+//! submits them, and `shielded_unit_wei` for an ARX-20 with its own unit.
 //!
 //! Browsers may only call it from the origins in `ARXON_PROVE_ORIGINS`
 //! (comma separated, default: localhost pages). Any other web page gets no CORS
@@ -204,7 +207,7 @@ fn handle(mut stream: TcpStream) {
 }
 
 fn main() {
-	eprintln!("warming Halo2 proving keys (C1, C2, C3) — first run can take several minutes");
+	eprintln!("warming Halo2 proving keys (C1, C2, C3); the first run can take several minutes");
 	arxon_prove::warm_keys();
 	let listener = TcpListener::bind(BIND).expect("bind 127.0.0.1:17871");
 	eprintln!("arxon-prove listening on http://{BIND}");

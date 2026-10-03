@@ -1,4 +1,5 @@
-//! JSON in / JSON out, matching the local HTTP prover.
+//! JSON in / JSON out, matching the local HTTP prover. Request fields are those
+//! of `arxon_prove` (`fee_wei`, `fee_recipient` and `shielded_unit_wei` included).
 
 use wasm_bindgen::prelude::*;
 

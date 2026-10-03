@@ -1409,3 +1409,131 @@ fn submission_precompiles_reject_delegatecall() {
 		assert!(crate::submit::ensure_direct_call(&handle(address, attacker_contract)).is_err());
 	}
 }
+
+/// The test handle's `tx.origin` is Alice: an unshield she signs through a
+/// token is refused once she hides her balance, as a native unshield she signs.
+#[test]
+fn arx20_unshield_reverts_when_the_transaction_signer_hides_its_balance() {
+	new_test_ext().execute_with(|| {
+		arx20_shield(42 * UNIT);
+		let anchor = H256(NoteTree::current_root(TreeId::Arx20(token())).0);
+		pallet_privacy::HideBalanceAccounts::<Runtime>::insert(
+			crate::mock::AccountId::from(Alice),
+			true,
+		);
+
+		precompiles()
+			.prepare_test(
+				token(),
+				arx20_address(),
+				ACall::unshield {
+					recipient: Address(Bob.into()),
+					amount: U256::from(42 * UNIT),
+					anchor,
+					inputs: abi_inputs(vec![abi_input(10, 11)]),
+					outputs: abi_outputs(vec![]),
+					mask_bits: 0,
+					expiry_block: U256::from(EXPIRY),
+					proofs: abi_proofs(true, false),
+				},
+			)
+			.execute_reverts(|out| revert_contains(out, "SenderHidesBalance"));
+
+		assert!(!NullifierRegistry::is_spent(&FieldBytes(h(10).0)));
+	});
+}
+
+fn flag(who: impl Into<crate::mock::AccountId>) {
+	pallet_privacy::HideBalanceAccounts::<Runtime>::insert(who.into(), true);
+}
+
+#[test]
+fn submit_unshield_reverts_when_the_transaction_signer_hides_its_balance() {
+	new_test_ext().execute_with(|| {
+		let anchor = shield_42();
+		flag(Alice);
+
+		precompiles()
+			.prepare_test(
+				Alice,
+				submit_address(),
+				SCall::unshield_with_fee {
+					recipient: Address(Bob.into()),
+					amount: U256::from(40 * UNIT),
+					anchor,
+					inputs: abi_inputs(vec![abi_input(10, 11)]),
+					outputs: abi_outputs(vec![]),
+					mask_bits: 0,
+					expiry_block: U256::from(EXPIRY),
+					fee: AbiRelayFee {
+						recipient: Address(Charlie.into()),
+						amount: U256::from(2 * UNIT),
+					},
+					proofs: abi_proofs(true, false),
+				},
+			)
+			.execute_reverts(|out| revert_contains(out, "SenderHidesBalance"));
+
+		assert_eq!(Privacy::pool_balance(), 42 * UNIT);
+	});
+}
+
+#[test]
+fn arx20_unshield_with_fee_reverts_when_the_transaction_signer_hides_its_balance() {
+	new_test_ext().execute_with(|| {
+		arx20_shield(42 * UNIT);
+		let anchor = H256(NoteTree::current_root(TreeId::Arx20(token())).0);
+		flag(Alice);
+
+		precompiles()
+			.prepare_test(
+				token(),
+				arx20_address(),
+				ACall::unshield_with_fee {
+					recipient: Address(Bob.into()),
+					amount: U256::from(40 * UNIT),
+					anchor,
+					inputs: abi_inputs(vec![abi_input(10, 11)]),
+					outputs: abi_outputs(vec![]),
+					mask_bits: 0,
+					expiry_block: U256::from(EXPIRY),
+					fee: AbiRelayFee {
+						recipient: Address(Charlie.into()),
+						amount: U256::from(2 * UNIT),
+					},
+					proofs: abi_proofs(true, false),
+				},
+			)
+			.execute_reverts(|out| revert_contains(out, "SenderHidesBalance"));
+	});
+}
+
+#[test]
+fn arx20_relayer_fee_reverts_when_its_recipient_hides_its_balance() {
+	new_test_ext().execute_with(|| {
+		arx20_shield(42 * UNIT);
+		let anchor = H256(NoteTree::current_root(TreeId::Arx20(token())).0);
+		flag(Charlie);
+
+		precompiles()
+			.prepare_test(
+				token(),
+				arx20_address(),
+				ACall::submit_private_transfer_with_fee {
+					anchor,
+					inputs: abi_inputs(vec![abi_input(10, 11)]),
+					outputs: abi_outputs(vec![abi_output(3, 4)]),
+					mask_bits: 0b1111,
+					expiry_block: U256::from(EXPIRY),
+					ptr: none_attachment(),
+					compliance: none_attachment(),
+					fee: AbiRelayFee {
+						recipient: Address(Charlie.into()),
+						amount: U256::from(2 * UNIT),
+					},
+					proofs: abi_proofs(true, true),
+				},
+			)
+			.execute_reverts(|out| revert_contains(out, "RecipientHidesBalance"));
+	});
+}

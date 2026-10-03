@@ -8,6 +8,9 @@ bundles that pay it at least its minimum fee. Bundles without a fee are
 accepted while `RELAYER_ACCEPT_FREE` is on (the default, so wallets that do not
 attach a fee yet keep working); turn it off once they do.
 
+A native fee must also cover the gas the relayer spends on the bundle
+(`eth_estimateGas` times the gas price), whatever the configured minimum.
+
 Native ARX bundles go to the `0x801` precompile. ARX-20 bundles go to the token
 contract (`to` in the request), which forwards them to `0x802` and mints the
 fee to the relayer; only tokens listed in `RELAYER_TOKENS` are relayed, with
@@ -123,6 +126,11 @@ def check(cfg: Config, to: str, data: str) -> str:
 	Raises ValueError when the relayer must not submit it: an unknown target or
 	method, a fee paid to someone else, or a fee below the minimum.
 	"""
+	return checked(cfg, to, data)[0]
+
+
+def checked(cfg: Config, to: str, data: str) -> tuple[str, int | None]:
+	"""`check`, also returning the fee the bundle pays (None when fee-free)."""
 	if not isinstance(data, str) or not data.startswith("0x") or len(data) < 10:
 		raise ValueError("data must be 0x-prefixed calldata")
 	target = (to or SUBMIT).strip().lower()
@@ -139,7 +147,7 @@ def check(cfg: Config, to: str, data: str) -> str:
 	if method.fee_index is None:
 		if not cfg.accept_free:
 			raise ValueError("this relayer needs a fee: use the WithFee variant paying %s" % cfg.payer)
-		return target
+		return target, None
 	from eth_abi import decode
 
 	try:
@@ -151,7 +159,12 @@ def check(cfg: Config, to: str, data: str) -> str:
 		raise ValueError("the fee must be paid to this relayer, %s" % cfg.payer)
 	if amount < min_fee:
 		raise ValueError("fee %d is below this relayer's minimum %d" % (amount, min_fee))
-	return target
+	return target, amount
+
+
+def covers_gas(fee: int, gas: int, gas_price: int) -> bool:
+	"""`True` iff a native fee pays at least what submitting costs the relayer."""
+	return fee >= gas * gas_price
 
 
 def cors(handler: BaseHTTPRequestHandler) -> None:
@@ -194,22 +207,21 @@ def account():
 
 
 def submit(cfg: Config, to: str, data: str) -> str:
-	target = check(cfg, to, data)
+	target, fee = checked(cfg, to, data)
 	acct = account()
 	payer = acct.address
 	# A bundle that would revert (spent note, flagged recipient, bad proof) costs
-	# the relayer gas; dry-run it first.
-	rpc(
-		"eth_call",
-		[{"from": payer, "to": target, "data": data, "gas": hex(GAS)}, "latest"],
-	)
-	nonce = int(rpc("eth_getTransactionCount", [payer, "pending"]), 16)
+	# the relayer gas: the estimate is also the dry run, and fails for those.
+	gas = int(rpc("eth_estimateGas", [{"from": payer, "to": target, "data": data, "gas": hex(GAS)}]), 16)
 	gas_price = int(rpc("eth_gasPrice", []), 16)
+	if fee is not None and target == SUBMIT and not covers_gas(fee, gas, gas_price):
+		raise ValueError("fee %d does not cover the gas, %d wei" % (fee, gas * gas_price))
+	nonce = int(rpc("eth_getTransactionCount", [payer, "pending"]), 16)
 	signed = acct.sign_transaction(
 		{
 			"nonce": nonce,
 			"gasPrice": gas_price,
-			"gas": GAS,
+			"gas": min(GAS, gas * 12 // 10),
 			"to": target,
 			"value": 0,
 			"data": data,

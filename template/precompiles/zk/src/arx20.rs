@@ -17,6 +17,9 @@
 //! code is stored; it fixes the shielded unit (`10^(decimals - 9)` base units,
 //! 1 for 9 decimals or fewer) once, while the pool is empty.
 //!
+//! An unshield is refused when the transaction's signer (`tx.origin`) hides its
+//! balance, the rule the native path applies to the extrinsic signer.
+//!
 //! The `WithFee` variants bind a relayer fee `(recipient, amount)` in token
 //! base units into the proofs. The pool records it; the token mints it to the
 //! fee recipient, like the unshielded amount.
@@ -35,9 +38,9 @@ use sp_core::{H160, H256, U256};
 use sp_runtime::{traits::Dispatchable, SaturatedConversion};
 
 use crate::submit::{
-	ensure_direct_call, ensure_no_value, signed_origin, to_balance, to_block_number, to_compliance,
-	to_inputs, to_outputs, to_proofs, to_ptr, to_relay_fee, AbiInputs, AbiOptionalAttachment,
-	AbiOutputs, AbiProofs, AbiRelayFee,
+	ensure_direct_call, ensure_no_value, ensure_origin_shows_balance, signed_origin, to_balance,
+	to_block_number, to_compliance, to_inputs, to_outputs, to_proofs, to_ptr, to_relay_fee,
+	AbiInputs, AbiOptionalAttachment, AbiOutputs, AbiProofs, AbiRelayFee,
 };
 use crate::LEAF_READ_BYTES;
 
@@ -112,6 +115,7 @@ where
 		ensure_direct_call(handle)?;
 		ensure_no_value(handle)?;
 		let token = caller_token(handle)?;
+		ensure_origin_shows_balance::<R>(handle)?;
 		let recipient = R::AddressMapping::into_account_id(recipient.into());
 		RuntimeHelper::<R>::try_dispatch(
 			handle,
@@ -188,6 +192,7 @@ where
 		ensure_direct_call(handle)?;
 		ensure_no_value(handle)?;
 		let token = caller_token(handle)?;
+		ensure_origin_shows_balance::<R>(handle)?;
 		let recipient = R::AddressMapping::into_account_id(recipient.into());
 		RuntimeHelper::<R>::try_dispatch(
 			handle,

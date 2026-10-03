@@ -4,6 +4,8 @@
 
 use frame_benchmarking::v2::*;
 use frame_system::RawOrigin;
+use sp_core::H160;
+use sp_runtime::traits::Convert;
 
 use super::*;
 
@@ -30,6 +32,19 @@ mod benchmarks {
 		_(RawOrigin::Signed(caller.clone()), true);
 
 		assert!(HideBalanceAccounts::<T>::get(&caller));
+		assert!(HideBalancePending::<T>::get(&caller).is_some());
+	}
+
+	/// Worst case: the largest decimals (the longest power) on an empty pool.
+	#[benchmark]
+	fn set_arx20_unit() {
+		let token = H160::repeat_byte(0x20);
+		let signer = T::TokenToAccount::convert(token);
+
+		#[extrinsic_call]
+		_(RawOrigin::Signed(signer), token, MAX_ARX20_DECIMALS);
+
+		assert!(Arx20Unit::<T>::get(token).is_some());
 	}
 
 	/// Worst case: the caller replaces a key it registered before, which also

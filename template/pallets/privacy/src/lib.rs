@@ -23,11 +23,13 @@
 //! caller, and every proof carries the bundle digest of those arguments, so a
 //! proof cannot be re-targeted or replayed.
 //!
-//! The extrinsic signer only pays the fee; it is deliberately absent from the
-//! bundle digest so any relayer can submit a bundle. Shielded amounts are `u64`
-//! multiples of `ShieldedUnit` base units. `hide_balance` (bit 3) has no
-//! meaning in the circuits: it is recorded with the bundle mask, and
-//! `HideBalanceAccounts` is a separate opt-in flag set by `set_balance_visibility`.
+//! The extrinsic signer only pays the transaction fee; it is deliberately
+//! absent from the bundle digest so any relayer can submit a bundle, and the
+//! `_with_fee` calls pay that relayer from the pool through Circuit 2's `fee`
+//! row. Shielded amounts are `u64` multiples of the pool's shielded unit.
+//! `hide_balance` (bit 3) has no meaning in the circuits: the pallet enforces
+//! it, with the account flag set by `set_balance_visibility` (see
+//! `check_hide_balance`).
 //!
 //! Wire ids: call index 1 (`record_tx_privacy`) is burned; it let anyone paint
 //! flags on any hash and is gone.
@@ -445,17 +447,18 @@ pub mod pallet {
 	pub type ShieldedTxCount<T: Config> = StorageValue<_, u64, ValueQuery>;
 
 	/// Hide-balance flag each account last asked for. It takes effect
-	/// `MaxProofValidity` blocks after it changes ([`Pallet::is_balance_hidden`]).
+	/// `MaxProofValidity + 1` blocks after it changes ([`Pallet::is_balance_hidden`]).
 	#[pallet::storage]
 	pub type HideBalanceAccounts<T: Config> =
 		StorageMap<_, Blake2_128Concat, T::AccountId, bool, ValueQuery>;
 
-	/// Block at which an account last changed its hide-balance flag. Until
-	/// `MaxProofValidity` blocks have passed the previous value still applies, so
-	/// flipping the flag cannot invalidate a bundle a relayer is already submitting.
+	/// A hide-balance change still maturing: the block it was made at and the
+	/// value in force before it. Until `MaxProofValidity + 1` blocks have passed
+	/// that previous value applies, so flipping the flag (even twice) cannot
+	/// invalidate a bundle a relayer is already submitting.
 	#[pallet::storage]
-	pub type HideBalanceChangedAt<T: Config> =
-		StorageMap<_, Blake2_128Concat, T::AccountId, BlockNumberFor<T>>;
+	pub type HideBalancePending<T: Config> =
+		StorageMap<_, Blake2_128Concat, T::AccountId, (BlockNumberFor<T>, bool)>;
 
 	/// Base units per shielded unit of an ARX-20 token, when it set one. Unset
 	/// tokens use the native `ShieldedUnit`.
@@ -487,7 +490,8 @@ pub mod pallet {
 			who: T::AccountId,
 			/// `true` = hidden.
 			hidden: bool,
-			/// First block at which the new value is enforced.
+			/// First block at which the new value is enforced (the current block
+			/// when nothing changed or a pending change was cancelled).
 			effective_from: BlockNumberFor<T>,
 		},
 		/// An account linked a shielded public key.
@@ -642,9 +646,9 @@ pub mod pallet {
 		ZeroTokenAddress,
 		/// A bundle marked hide-balance (mask bit 3) cannot unshield: its value stays notes.
 		HideBalanceForbidsUnshield,
-		/// The unshield recipient hides its balance: pool value cannot land in its public pocket.
+		/// The unshield or fee recipient hides its balance: pool value cannot land in its public pocket.
 		RecipientHidesBalance,
-		/// The account spending (the signer, or the revealed sender) hides its balance.
+		/// The signer of an unshield (or, on `0x802`, the transaction origin) hides its balance.
 		SenderHidesBalance,
 		/// ARX-20 pools only run at contract addresses (not EOAs or EIP-7702 accounts).
 		NotATokenContract,
@@ -670,22 +674,28 @@ pub mod pallet {
 
 		// Call index 1 was `record_tx_privacy`: removed, never reuse.
 
-		/// Turns hide-balance on or off for the signer. While on, pool value
-		/// cannot be unshielded to the account nor spent by it (as signer or as
-		/// revealed sender) into a public pocket. The change is enforced only
-		/// `MaxProofValidity` blocks later, so it cannot invalidate a bundle that is
-		/// already being relayed.
+		/// Turns hide-balance on or off for the signer. While on, no pool value
+		/// lands in the account (neither as an unshield nor as a relayer fee) and
+		/// it cannot sign an unshield. The change is enforced `MaxProofValidity + 1`
+		/// blocks later, so it cannot invalidate a bundle that is already being
+		/// relayed; asking for the value in force again cancels a pending change.
 		#[pallet::call_index(2)]
 		#[pallet::weight(T::WeightInfo::set_balance_visibility())]
 		pub fn set_balance_visibility(origin: OriginFor<T>, hidden: bool) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 			let now = frame_system::Pallet::<T>::block_number();
 			if HideBalanceAccounts::<T>::get(&who) != hidden {
+				let in_force = Self::is_balance_hidden(&who);
 				HideBalanceAccounts::<T>::insert(&who, hidden);
-				HideBalanceChangedAt::<T>::insert(&who, now);
+				if hidden == in_force {
+					HideBalancePending::<T>::remove(&who);
+				} else {
+					HideBalancePending::<T>::insert(&who, (now, in_force));
+				}
 			}
-			let effective_from = HideBalanceChangedAt::<T>::get(&who)
-				.map(Self::visibility_effective_from)
+			let effective_from = HideBalancePending::<T>::get(&who)
+				.map(|(at, _)| Self::visibility_effective_from(at))
+				.filter(|from| *from > now)
 				.unwrap_or(now);
 			Self::deposit_event(Event::BalanceVisibilitySet {
 				who,
@@ -1215,15 +1225,14 @@ pub mod pallet {
 		/// `true` iff hide-balance is in force for `who` at the current block: the
 		/// value it asked for, or the previous one while a change is still maturing.
 		pub fn is_balance_hidden(who: &T::AccountId) -> bool {
-			let requested = HideBalanceAccounts::<T>::get(who);
-			match HideBalanceChangedAt::<T>::get(who) {
-				Some(at)
+			match HideBalancePending::<T>::get(who) {
+				Some((at, previous))
 					if frame_system::Pallet::<T>::block_number()
 						< Self::visibility_effective_from(at) =>
 				{
-					!requested
+					previous
 				}
-				_ => requested,
+				_ => HideBalanceAccounts::<T>::get(who),
 			}
 		}
 
@@ -1239,11 +1248,20 @@ pub mod pallet {
 
 		/// Hide-balance rules. The spender of a bundle is hidden, so a flag cannot
 		/// be tied to it cryptographically; what is enforced is every link the
-		/// chain can see: a bundle marked hide-balance never unshields, pool value
-		/// never lands in a flagged account, and a flagged account never unshields
-		/// as the signer or as a revealed sender (Circuit 3 forces a revealed sender
-		/// to be the note owner's key).
+		/// chain can see: a bundle marked hide-balance never unshields, no pool
+		/// value lands in a flagged account (as an unshield or as a relayer fee),
+		/// and a flagged account never signs an unshield.
+		///
+		/// Revealed sender keys are deliberately not looked up: key registration
+		/// is first come, first served, so anyone could register a victim's
+		/// public key to a flagged account and block the victim's unshields.
 		fn check_hide_balance(intent: &Intent<T>) -> DispatchResult {
+			if let Some(fee) = &intent.fee {
+				ensure!(
+					!Self::is_balance_hidden(&fee.recipient),
+					Error::<T>::RecipientHidesBalance
+				);
+			}
 			let ValueFlow::Unshield { recipient, .. } = &intent.value else {
 				return Ok(());
 			};
@@ -1260,16 +1278,6 @@ pub mod pallet {
 					!Self::is_balance_hidden(signer),
 					Error::<T>::SenderHidesBalance
 				);
-			}
-			if !hides_sender(intent.mask_bits) {
-				for input in intent.inputs.iter() {
-					if let Some(owner) = ShieldedKeyOwners::<T>::get(input.revealed_sender) {
-						ensure!(
-							!Self::is_balance_hidden(&owner),
-							Error::<T>::SenderHidesBalance
-						);
-					}
-				}
 			}
 			Ok(())
 		}

@@ -54,13 +54,13 @@ impl<T: Config> SubstrateWeight<T> {
 		// Checks: duplicate bundle, known anchor, pool balance, spent nullifiers,
 		// duplicate leaves, revealed party lookups, membership root; then the
 		// bundle record and the shielded counter.
-		// Plus, on bundles that spend: the asset's unit, the hide-balance flag
-		// (value and change block) of the signer, the recipient and each revealed
-		// sender's registered owner, and the relayer fee transfer out of the pool.
-		// Charged whether or not the bundle carries a fee, so the weight does not
-		// depend on arguments the call macro cannot see cheaply. ARX-20 bundles
-		// also read the token's code size and, for a 23-byte code, the code
-		// itself (the EIP-7702 check); native bundles pay for it too.
+		// Plus the asset's unit and, on bundles that spend, the hide-balance flag
+		// (value and pending change) of the recipient, the signer and the fee
+		// recipient, and the relayer fee transfer out of the pool. Charged whether
+		// or not the bundle carries a fee, so the weight does not depend on
+		// arguments the call macro cannot see cheaply. ARX-20 bundles also read
+		// the token's code size and, for a 23-byte code, the code itself (the
+		// EIP-7702 check); native bundles pay for it too.
 		let spends = inputs > 0;
 		let reads = 1
 			+ u64::from(spends)
@@ -68,11 +68,7 @@ impl<T: Config> SubstrateWeight<T> {
 			+ 2 * u64::from(inputs)
 			+ 2 * u64::from(outputs)
 			+ 1 + u64::from(compliance)
-			+ 1 + 2 + if spends {
-			4 + 3 * u64::from(inputs) + 2
-		} else {
-			0
-		};
+			+ 1 + 2 + if spends { 3 * 2 + 2 } else { 0 };
 		let writes = 2 + if spends { 2 } else { 0 };
 		let mut w =
 			Weight::from_parts(BUNDLE_COMPUTE, 0).saturating_add(db.reads_writes(reads, writes));

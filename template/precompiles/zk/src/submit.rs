@@ -20,7 +20,8 @@
 //! `setBalanceVisibility` is the hide-balance switch of the caller, an account
 //! signing its own transaction (`msg.sender == tx.origin`). It takes effect
 //! `MaxProofValidity + 1` blocks later; `isBalanceHidden` answers with the
-//! value in force now.
+//! value in force now. An unshield is refused when its caller or its
+//! transaction signer (`tx.origin`) hides its balance.
 
 use alloc::vec::Vec;
 use core::marker::PhantomData;
@@ -178,6 +179,7 @@ where
 	) -> EvmResult {
 		ensure_direct_call(handle)?;
 		ensure_no_value(handle)?;
+		ensure_origin_shows_balance::<R>(handle)?;
 		let recipient = R::AddressMapping::into_account_id(recipient.into());
 		RuntimeHelper::<R>::try_dispatch(
 			handle,
@@ -250,6 +252,7 @@ where
 	) -> EvmResult {
 		ensure_direct_call(handle)?;
 		ensure_no_value(handle)?;
+		ensure_origin_shows_balance::<R>(handle)?;
 		let recipient = R::AddressMapping::into_account_id(recipient.into());
 		RuntimeHelper::<R>::try_dispatch(
 			handle,
@@ -333,12 +336,36 @@ where
 	#[precompile::public("isBalanceHidden(address)")]
 	#[precompile::view]
 	fn is_balance_hidden(handle: &mut impl PrecompileHandle, account: Address) -> EvmResult<bool> {
-		// The flag and the block it last changed at.
-		handle.record_db_read::<R>(1)?;
-		handle.record_db_read::<R>(4)?;
+		record_flag_reads::<R>(handle)?;
 		let who = R::AddressMapping::into_account_id(account.into());
 		Ok(pallet_privacy::Pallet::<R>::is_balance_hidden(&who))
 	}
+}
+
+/// Gas for reading an account's hide-balance flag: the flag and its pending
+/// change (`HideBalanceAccounts` and `HideBalancePending` entries).
+fn record_flag_reads<R: pallet_evm::Config>(handle: &mut impl PrecompileHandle) -> EvmResult {
+	handle.record_db_read::<R>(37)?;
+	handle.record_db_read::<R>(41)?;
+	Ok(())
+}
+
+/// Refuses an unshield whose transaction signer (`tx.origin`) hides its
+/// balance. The pallet applies the rule to the extrinsic signer, which on the
+/// EVM paths is a contract whenever the user goes through one (always, for an
+/// ARX-20 token), so the precompiles apply it to the origin too.
+pub(crate) fn ensure_origin_shows_balance<R>(handle: &mut impl PrecompileHandle) -> EvmResult
+where
+	R: pallet_evm::Config
+		+ pallet_privacy::Config
+		+ frame_system::Config<AccountId = pallet_evm::AccountIdOf<R>>,
+{
+	record_flag_reads::<R>(handle)?;
+	let origin = R::AddressMapping::into_account_id(handle.origin());
+	if pallet_privacy::Pallet::<R>::is_balance_hidden(&origin) {
+		return Err(revert("SenderHidesBalance"));
+	}
+	Ok(())
 }
 
 /// The submission precompiles act for `context.caller`. Under DELEGATECALL

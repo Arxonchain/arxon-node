@@ -175,7 +175,10 @@ fn prove_bundle_with(
 		ValueFlow::Unshield { amount, .. } => (0, (*amount / unit) as u64),
 		ValueFlow::Transfer => (0, 0),
 	};
-	let fee = attachments.fee.as_ref().map_or(0, |f| (f.amount / unit) as u64);
+	let fee = attachments
+		.fee
+		.as_ref()
+		.map_or(0, |f| (f.amount / unit) as u64);
 	let digest = Privacy::bundle_digest_for(&intent).expect("valid intent");
 	let ctx = BundleContext {
 		mask,
@@ -983,18 +986,26 @@ fn json_proof(v: &serde_json::Value) -> Option<Proof> {
 
 fn json_bundle(res: &serde_json::Value) -> (Inputs, Outputs, ProofBundle) {
 	let empty = Vec::new();
-	let inputs = res["inputs"].as_array().unwrap_or(&empty).iter().map(|i| Input {
-		nullifier: json_field(&i["nullifier"]),
-		cv: json_field(&i["cv"]),
-		revealed_sender: json_field(&i["revealed_sender"]),
-	});
-	let outputs = res["outputs"].as_array().expect("outputs").iter().map(|o| Output {
-		cm: json_field(&o["cm"]),
-		cv: json_field(&o["cv"]),
-		revealed_receiver: json_field(&o["revealed_receiver"]),
-		revealed_amount: json_field(&o["revealed_amount"]),
-		encrypted_note: BoundedVec::truncate_from(json_bytes(&o["encrypted_note"])),
-	});
+	let inputs = res["inputs"]
+		.as_array()
+		.unwrap_or(&empty)
+		.iter()
+		.map(|i| Input {
+			nullifier: json_field(&i["nullifier"]),
+			cv: json_field(&i["cv"]),
+			revealed_sender: json_field(&i["revealed_sender"]),
+		});
+	let outputs = res["outputs"]
+		.as_array()
+		.expect("outputs")
+		.iter()
+		.map(|o| Output {
+			cm: json_field(&o["cm"]),
+			cv: json_field(&o["cv"]),
+			revealed_receiver: json_field(&o["revealed_receiver"]),
+			revealed_amount: json_field(&o["revealed_amount"]),
+			encrypted_note: BoundedVec::truncate_from(json_bytes(&o["encrypted_note"])),
+		});
 	let p = &res["proofs"];
 	(
 		Inputs::truncate_from(inputs.collect()),

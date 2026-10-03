@@ -93,7 +93,7 @@ describeWithFrontier("Arxon ZK submit precompile (0x801)", (context) => {
 	it("setBalanceVisibility is accepted from the signing account", async function () {
 		const data = context.web3.eth.abi.encodeFunctionCall(
 			{ name: "setBalanceVisibility", type: "function", inputs: [{ type: "bool", name: "hidden" }] },
-			[true]
+			[true] as any
 		);
 		const result = await call(ARXON_ZK_SUBMIT_PRECOMPILE, data);
 		expect(result.error, JSON.stringify(result.error)).to.be.undefined;

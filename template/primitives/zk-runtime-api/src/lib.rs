@@ -32,10 +32,10 @@ sp_api::decl_runtime_apis! {
 		/// order, capped at 1024 and at the last leaf; `None` for an unknown tree id.
 		/// Wallets sync a tree page by page instead of leaf by leaf. Since version 2.
 		fn leaves(tree: u8, start: u64, count: u32) -> Option<alloc::vec::Vec<[u8; 32]>>;
-		/// `true` iff hide-balance is in force for the EVM `account` now: pool
-		/// value is never unshielded to it and it never signs an unshield. A
-		/// change takes `MaxProofValidity + 1` blocks; until then this reports
-		/// the previous value. Since version 3.
+		/// `true` iff hide-balance is in force for the EVM `account` now: no
+		/// pool value lands in it (as an unshield or a relayer fee) and it never
+		/// signs an unshield. A change takes `MaxProofValidity + 1` blocks; until
+		/// then this reports the previous value. Since version 3.
 		fn balance_hidden(account: [u8; 20]) -> bool;
 		/// Base units of ARX-20 `token` per shielded unit: amounts and fees of
 		/// its pool are multiples of it. Since version 3.

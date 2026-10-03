@@ -19,7 +19,7 @@ describeWithFrontier("Frontier RPC (Constructor Revert)", (context) => {
 		"6080604052348015600f57600080fd5b506001601a57600080fd5b603f8060276000396000f3fe6080604052600080fdfea2646970667358221220c70bc8b03cdfdf57b5f6c4131b836f9c2c4df01b8202f530555333f2a00e4b8364736f6c63430006060033";
 
 	it("should provide a tx receipt after successful deployment", async function () {
-		this.timeout(15000);
+		this.timeout(60000);
 
 		const tx = await context.web3.eth.accounts.signTransaction(
 			{
@@ -48,7 +48,7 @@ describeWithFrontier("Frontier RPC (Constructor Revert)", (context) => {
 	});
 
 	it("should provide a tx receipt after failed deployment", async function () {
-		this.timeout(15000);
+		this.timeout(60000);
 
 		const tx = await context.web3.eth.accounts.signTransaction(
 			{

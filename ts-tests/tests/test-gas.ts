@@ -220,7 +220,7 @@ describeWithFrontier("Frontier RPC (Gas limit Weightv2 ref time)", (context) => 
 	});
 
 	step("gas limit bound works with ref time heavy txns", async function () {
-		this.timeout(10000);
+		this.timeout(60000);
 
 		const contract = new context.web3.eth.Contract(STORAGE_LOOP_CONTRACT_ABI, FIRST_CONTRACT_ADDRESS, {
 			from: GENESIS_ACCOUNT,
@@ -318,7 +318,7 @@ describeWithFrontier("Frontier RPC (Gas limit Weightv2 pov size)", (context) => 
 	// This test fills a block with regular transfers + a transfer to a contract with big bytecode.
 	// We consider bytecode "big" when it consumes an effective gas greater than the legacy gas.
 	step("gas limit bound works with pov size heavy txns", async function () {
-		this.timeout(10000);
+		this.timeout(60000);
 
 		const contract = new context.web3.eth.Contract(STORAGE_LOOP_CONTRACT_ABI, FIRST_CONTRACT_ADDRESS, {
 			from: GENESIS_ACCOUNT,

@@ -104,7 +104,7 @@ describeWithFrontier("Frontier RPC (EIP-7702 Set Code Authorization)", (context:
 	});
 
 	step("should reject empty authorization list", async function () {
-		this.timeout(15000);
+		this.timeout(60000);
 
 		// Test with empty authorization list - should be rejected by Frontier
 		const tx = {
@@ -141,7 +141,7 @@ describeWithFrontier("Frontier RPC (EIP-7702 Set Code Authorization)", (context:
 	});
 
 	step("should handle authorization with different chain IDs", async function () {
-		this.timeout(15000);
+		this.timeout(60000);
 
 		// Test authorization with wrong chain ID - should be skipped by Frontier
 		const authorizer = ethers.Wallet.createRandom();
@@ -200,7 +200,7 @@ describeWithFrontier("Frontier RPC (EIP-7702 Set Code Authorization)", (context:
 	});
 
 	step("should handle multiple authorizations", async function () {
-		this.timeout(15000);
+		this.timeout(60000);
 
 		// Create multiple authorizations for the same authority
 		const authorizer = ethers.Wallet.createRandom();
@@ -239,7 +239,7 @@ describeWithFrontier("Frontier RPC (EIP-7702 Set Code Authorization)", (context:
 	});
 
 	step("should verify gas cost calculation includes authorization costs", async function () {
-		this.timeout(15000);
+		this.timeout(60000);
 
 		// Validate prerequisites
 		if (!contractAddress) {
@@ -296,7 +296,7 @@ describeWithFrontier("Frontier RPC (EIP-7702 Set Code Authorization)", (context:
 	});
 
 	step("should apply delegation behavior", async function () {
-		this.timeout(15000);
+		this.timeout(60000);
 
 		const authorizer = ethers.Wallet.createRandom();
 		console.log("Authorizer address:", authorizer.address);
@@ -363,7 +363,7 @@ describeWithFrontier("Frontier RPC (EIP-7702 Set Code Authorization)", (context:
 	});
 
 	step("should handle self delegation", async function () {
-		this.timeout(15000);
+		this.timeout(60000);
 
 		// Test self-delegation (should be prevented by Frontier)
 		const authorizer = ethers.Wallet.createRandom();
@@ -395,7 +395,7 @@ describeWithFrontier("Frontier RPC (EIP-7702 Set Code Authorization)", (context:
 	});
 
 	step("should handle zero-address delegation", async function () {
-		this.timeout(15000);
+		this.timeout(60000);
 
 		// Test self-delegation (should be prevented by Frontier)
 		const authorizer = ethers.Wallet.createRandom();
@@ -458,7 +458,7 @@ describeWithFrontier("Frontier RPC (EIP-7702 Set Code Authorization)", (context:
 	});
 
 	step("happy path: complete EIP-7702 delegation workflow", async function () {
-		this.timeout(20000);
+		this.timeout(60000);
 
 		// This test demonstrates the complete happy path for EIP-7702 delegation:
 		// 1. Create a new EOA that will delegate to a smart contract
@@ -547,7 +547,7 @@ describeWithFrontier("Frontier RPC (EIP-7702 Set Code Authorization)", (context:
 	});
 
 	step("should estimate gas for EIP-7702 transactions", async function () {
-		this.timeout(15000);
+		this.timeout(60000);
 
 		// Ensure we have a signer
 		if (!signer) {

@@ -55,6 +55,7 @@ fn main() {
 		expiry_block: 1_000,
 		transparent_in: 0,
 		transparent_out: 0,
+		fee: 0,
 	};
 	let alice = SpendingKey::random(&mut rng);
 	let bob = SpendingKey::random(&mut rng);

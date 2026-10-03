@@ -166,6 +166,8 @@ pub struct BundleContext {
 	pub transparent_in: u64,
 	/// Transparent value leaving the pool, in shielded units.
 	pub transparent_out: u64,
+	/// Relayer fee paid from the pool (Circuit 2 `fee` row), in shielded units.
+	pub fee: u64,
 }
 
 /// Circuit 3 witnesses, one per spend.
@@ -237,7 +239,7 @@ pub fn balance_witness(
 		r_out,
 		transparent_in: ctx.transparent_in,
 		transparent_out: ctx.transparent_out,
-		fee: 0,
+		fee: ctx.fee,
 		bundle_digest: ctx.bundle_digest,
 		expiry_block: ctx.expiry_block,
 	}
@@ -247,8 +249,9 @@ pub fn balance_witness(
 pub fn is_balanced(spends: &[SpendNote], outputs: &[OutputNote], ctx: &BundleContext) -> bool {
 	let inputs: u128 =
 		spends.iter().map(|s| s.note.amount as u128).sum::<u128>() + ctx.transparent_in as u128;
-	let outputs: u128 =
-		outputs.iter().map(|o| o.note.amount as u128).sum::<u128>() + ctx.transparent_out as u128;
+	let outputs: u128 = outputs.iter().map(|o| o.note.amount as u128).sum::<u128>()
+		+ ctx.transparent_out as u128
+		+ ctx.fee as u128;
 	inputs == outputs
 }
 

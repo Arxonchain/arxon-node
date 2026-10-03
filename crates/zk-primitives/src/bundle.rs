@@ -7,7 +7,9 @@
 //! a mempool observer cannot re-target an unshield or replay a shield.
 //!
 //! The extrinsic signer is deliberately excluded so that any relayer may submit
-//! (and pay the fee for) a bundle on behalf of the shielded sender.
+//! a bundle on behalf of the shielded sender. A relayer is paid from the pool
+//! through the Circuit 2 `fee` row; the fee and the account it goes to are both
+//! in the digest, so nobody can change or redirect the fee.
 
 use alloc::vec::Vec;
 
@@ -29,9 +31,10 @@ pub struct BundleFields<'a> {
 	pub transparent_in: u64,
 	/// Transparent value leaving the pool (unshield), in shielded units.
 	pub transparent_out: u64,
-	/// In-circuit fee (Circuit 2 row), in shielded units. Zero in v1, committed anyway
-	/// so a shielded fee later is not a digest change.
+	/// Relayer fee paid from the pool (Circuit 2 `fee` row), in shielded units.
 	pub fee: u64,
+	/// SCALE-encoded account the fee is paid to. Set iff `fee > 0`.
+	pub fee_recipient: Option<&'a [u8]>,
 	/// Nullifiers of the spent notes, in bundle order.
 	pub nullifiers: &'a [FieldBytes],
 	/// Commitments of the created notes, in bundle order.
@@ -68,6 +71,13 @@ impl BundleFields<'_> {
 		self.encrypted_notes_hash.encode_to(&mut out);
 		self.receipt.encode_to(&mut out);
 		self.compliance.encode_to(&mut out);
+		// Appended only for relayed bundles, so every fee-free bundle keeps the
+		// digest wallets already compute. A preimage with the suffix cannot equal
+		// one without it: either the fee field differs, or the suffix carries the
+		// `Some` tag of a recipient a fee-free bundle may not have.
+		if self.fee > 0 || self.fee_recipient.is_some() {
+			self.fee_recipient.encode_to(&mut out);
+		}
 		out
 	}
 }

@@ -15,6 +15,7 @@ fn base<'a>(nullifiers: &'a [FieldBytes], commitments: &'a [FieldBytes]) -> Bund
 		transparent_in: 10,
 		transparent_out: 0,
 		fee: 0,
+		fee_recipient: None,
 		nullifiers,
 		commitments,
 		cv_inputs: &[],
@@ -223,4 +224,96 @@ fn arx20_bundle_digest_differs_from_native_and_binds_the_token() {
 		arx20_bundle_digest(&token_a, &fields),
 		arx20_bundle_digest(&token_a, &fields)
 	);
+}
+
+/// A fully populated fee-free bundle: every field set, so a change to the
+/// encoding of any of them moves the pinned digest.
+fn pinned_fields<'a>(
+	nullifiers: &'a [FieldBytes],
+	commitments: &'a [FieldBytes],
+	recipient: &'a [u8],
+) -> BundleFields<'a> {
+	BundleFields {
+		chain_id: CHAIN_ID,
+		expiry_block: 4242,
+		recipient: Some(recipient),
+		transparent_in: 0,
+		transparent_out: 7,
+		fee: 0,
+		fee_recipient: None,
+		nullifiers,
+		commitments,
+		cv_inputs: nullifiers,
+		cv_outputs: commitments,
+		mask_bits: 0b0101,
+		encrypted_notes_hash: [9u8; 32],
+		receipt: Some((0, fb(0x31))),
+		compliance: Some((1, fb(0x32))),
+	}
+}
+
+/// Digests of fee-free bundles are frozen: wallets already deployed compute
+/// them, so adding the relayer fee must not move them.
+#[test]
+fn fee_free_bundle_digests_are_pinned() {
+	let nfs = [fb(1), fb(2)];
+	let cms = [fb(3), fb(4)];
+	let fields = pinned_fields(&nfs, &cms, &[0x11; 20]);
+
+	assert_eq!(hex::encode(bundle_digest(&fields).0), PINNED_NATIVE_DIGEST);
+	assert_eq!(
+		hex::encode(arx20_bundle_digest(&[0x22; 20], &fields).0),
+		PINNED_ARX20_DIGEST
+	);
+}
+
+const PINNED_NATIVE_DIGEST: &str =
+	"9c697da09611a1f90cbfa9f33377bd8edc26d690da374101ee1f2cfcd898e100";
+const PINNED_ARX20_DIGEST: &str =
+	"370f7b48a0bc04e2bd3305923e212de35b81127984ab81d9074f4d9ac77b0d00";
+
+#[test]
+fn a_relayed_bundle_binds_its_fee_and_fee_recipient() {
+	let nfs = [fb(1), fb(2)];
+	let cms = [fb(3), fb(4)];
+	let free = pinned_fields(&nfs, &cms, &[0x11; 20]);
+	let relayed = BundleFields {
+		fee: 5,
+		fee_recipient: Some(&[0x77; 20]),
+		..free.clone()
+	};
+	let other_recipient = BundleFields {
+		fee_recipient: Some(&[0x78; 20]),
+		..relayed.clone()
+	};
+	let other_fee = BundleFields {
+		fee: 6,
+		..relayed.clone()
+	};
+
+	let digests = [
+		bundle_digest(&free),
+		bundle_digest(&relayed),
+		bundle_digest(&other_recipient),
+		bundle_digest(&other_fee),
+	];
+	for i in 0..digests.len() {
+		for j in i + 1..digests.len() {
+			assert_ne!(digests[i], digests[j], "digests {i} and {j} collide");
+		}
+	}
+}
+
+/// A fee recipient without a fee is not silently dropped: it still changes the
+/// preimage, so it can never be confused with a fee-free bundle.
+#[test]
+fn a_fee_recipient_without_a_fee_is_still_bound() {
+	let nfs = [fb(1)];
+	let free = pinned_fields(&nfs, &[], &[0x11; 20]);
+	let stray = BundleFields {
+		fee_recipient: Some(&[0x77; 20]),
+		..free.clone()
+	};
+
+	assert_ne!(bundle_digest(&free), bundle_digest(&stray));
 }

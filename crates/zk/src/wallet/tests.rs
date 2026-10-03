@@ -15,6 +15,7 @@ fn ctx(mask: u8, transparent_in: u64, transparent_out: u64) -> BundleContext {
 		expiry_block: 50,
 		transparent_in,
 		transparent_out,
+		fee: 0,
 	}
 }
 
@@ -100,6 +101,45 @@ fn unshield_witnesses_balance_against_transparent_out() {
 
 	assert!(is_balanced(std::slice::from_ref(&spend), &[], &ctx));
 	assert_satisfied(&mock_honest::<C2Circuit>(&c2));
+}
+
+/// A relayed unshield: 42 in, 40 out to the recipient, 2 to the relayer as fee.
+#[test]
+fn relayed_unshield_witness_balances_against_the_fee_row() {
+	let mut rng = deterministic_rng(7);
+	let alice = SpendingKey::random(&mut rng);
+	let funded = Note::new(alice.pk(), 42, &mut rng);
+	let mut tree = NoteTree::new(TreeKind::Note);
+	let index = tree.insert(funded.commitment());
+	let spend = SpendNote::new(alice, funded, tree.path(index), &mut rng);
+	let ctx = BundleContext {
+		fee: 2,
+		..ctx(0, 0, 40)
+	};
+
+	let c2 = balance_witness(std::slice::from_ref(&spend), &[], &ctx);
+
+	assert_eq!(c2.fee, 2);
+	assert!(is_balanced(std::slice::from_ref(&spend), &[], &ctx));
+	assert_satisfied(&mock_honest::<C2Circuit>(&c2));
+}
+
+#[test]
+fn is_balanced_counts_the_fee_as_value_leaving_the_bundle() {
+	let mut rng = deterministic_rng(8);
+	let k = SpendingKey::random(&mut rng);
+	let out = OutputNote::new(k.pk(), 40, &mut rng);
+	let paying_fee = BundleContext {
+		fee: 2,
+		..ctx(0, 42, 0)
+	};
+	let overpaying_fee = BundleContext {
+		fee: 3,
+		..ctx(0, 42, 0)
+	};
+
+	assert!(is_balanced(&[], &[out], &paying_fee));
+	assert!(!is_balanced(&[], &[out], &overpaying_fee));
 }
 
 #[test]

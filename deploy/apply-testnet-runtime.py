@@ -106,22 +106,23 @@ def addr_hex(value: str) -> str:
 	return s
 
 
+def eth_addr(seed: str) -> str:
+	from eth_account import Account
+
+	raw = seed if seed.startswith("0x") else "0x" + seed
+	return Account.from_key(raw).address
+
+
 def keypair_of(seed: str, inspect_acct: str = "") -> Keypair:
 	raw = seed if seed.startswith("0x") else "0x" + seed
-	kp = Keypair.create_from_private_key(raw, crypto_type=KeypairType.ECDSA)
-	addr = kp.ss58_address
-	print("signer", addr)
-	got = addr_hex(addr)
-	ins = addr_hex(inspect_acct) if inspect_acct else ""
-	want = addr_hex(LIVE_SUDO)
-	print("signer_hex", got)
-	if ins:
-		print("inspect_hex", ins)
-	if got == addr_hex(ALITH) or ins == addr_hex(ALITH):
+	eth = eth_addr(raw)
+	print("eth", eth)
+	print("eth_hex", addr_hex(eth))
+	if addr_hex(eth) == addr_hex(ALITH):
 		raise SystemExit("refusing Alith; live sudo is %s" % LIVE_SUDO)
-	if want not in (got, ins):
+	if addr_hex(eth) != addr_hex(LIVE_SUDO):
 		raise SystemExit("signer is not live sudo %s" % LIVE_SUDO)
-	return kp
+	return Keypair.create_from_private_key(raw, crypto_type=KeypairType.ECDSA)
 
 
 def main() -> int:

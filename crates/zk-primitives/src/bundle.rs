@@ -77,6 +77,18 @@ pub fn bundle_digest(fields: &BundleFields<'_>) -> FieldBytes {
 	FieldBytes::from_digest(blake2_256(&fields.preimage()))
 }
 
+/// ARX-20 digest: [`ARX20_BUNDLE_DOMAIN`] || SCALE(token) || native preimage.
+///
+/// Native [`bundle_digest`] is unchanged. Token bytes are the 20-byte EVM
+/// contract address, so two ARX-20s cannot share a proof.
+pub fn arx20_bundle_digest(token: &[u8; 20], fields: &BundleFields<'_>) -> FieldBytes {
+	use crate::constants::ARX20_BUNDLE_DOMAIN;
+	let mut out = ARX20_BUNDLE_DOMAIN.to_vec();
+	token.encode_to(&mut out);
+	out.extend_from_slice(&fields.preimage());
+	FieldBytes::from_digest(blake2_256(&out))
+}
+
 /// `blake2_256(bytes)` embedded as a canonical field element: the encoding of
 /// runtime-side identities such as a disclosure audience (an account id).
 pub fn digest_to_field(bytes: &[u8]) -> FieldBytes {

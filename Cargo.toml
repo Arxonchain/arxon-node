@@ -52,6 +52,8 @@ members = [
 	"template/fuzz",
 	"crates/zk-primitives",
 	"crates/zk",
+	"crates/zk-prover",
+	"crates/zk-prove-wasm",
 	"template/pallets/nullifier-registry",
 	"template/pallets/note-tree",
 	"template/pallets/zk-verifier",

@@ -2,7 +2,7 @@
 name = "pallet-evm-precompile-arxon-zk"
 version = "0.1.0"
 license = "Unlicense"
-description = "Arxon EVM precompiles 0x800 (view) and 0x801 (shield / unshield / private transfer) into the Halo2 shielded pool."
+description = "Arxon EVM precompiles 0x800 (view), 0x801 (native shield / unshield / private transfer), 0x802 (ARX-20)."
 authors = { workspace = true }
 edition = { workspace = true }
 repository = { workspace = true }

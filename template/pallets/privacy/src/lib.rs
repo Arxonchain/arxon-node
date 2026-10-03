@@ -6,10 +6,15 @@
 //! unrelated transaction: every private operation carries proofs that the
 //! runtime verifies before it touches state.
 //!
-//! Three operations move value:
+//! Three operations move native ARX:
 //! * [`Pallet::shield`]: transparent ARX from the signer into the pool, creating notes.
 //! * [`Pallet::unshield`]: notes are spent and ARX leaves the pool to a recipient.
 //! * [`Pallet::submit_private_transfer`]: notes are spent and new notes created.
+//!
+//! ARX-20 issued tokens use the same three operations on a **separate** tree and
+//! nullifier set per contract ([`Pallet::shield_arx20`], [`Pallet::unshield_arx20`],
+//! [`Pallet::submit_private_transfer_arx20`]). Native ARX never moves. Plain
+//! ERC-20 has no door here.
 //!
 //! All three funnel into one execution path that checks everything (mask,
 //! expiry window, amounts, anchor, nullifiers, proof shapes, then the proofs
@@ -123,6 +128,63 @@ impl PrivacyMask {
 			hide_amount: bits & 4 != 0,
 			hide_balance: bits & 8 != 0,
 		}
+	}
+}
+
+/// Which pool a bundle writes. Native ARX keeps `TreeId::Note` and the original
+/// nullifier map. Each ARX-20 token is isolated.
+#[derive(
+	Clone,
+	Copy,
+	Encode,
+	Decode,
+	DecodeWithMemTracking,
+	Eq,
+	PartialEq,
+	RuntimeDebug,
+	TypeInfo,
+	MaxEncodedLen
+)]
+pub enum PrivacyAsset {
+	/// Native ARX (`0x801` / existing extrinsics).
+	#[codec(index = 0)]
+	Native,
+	/// Issued ARX-20 contract.
+	#[codec(index = 1)]
+	Arx20(sp_core::H160),
+}
+
+impl PrivacyAsset {
+	/// Note tree this asset writes.
+	pub const fn tree(self) -> pallet_note_tree::TreeId {
+		match self {
+			Self::Native => pallet_note_tree::TreeId::Note,
+			Self::Arx20(token) => pallet_note_tree::TreeId::Arx20(token),
+		}
+	}
+
+	/// `None` for native ARX.
+	pub const fn token(self) -> Option<sp_core::H160> {
+		match self {
+			Self::Native => None,
+			Self::Arx20(token) => Some(token),
+		}
+	}
+
+	/// Native ARX pool.
+	pub const fn is_native(self) -> bool {
+		matches!(self, Self::Native)
+	}
+}
+
+/// `H160` → runtime `AccountId` via `From` (Arxon `AccountId20`, EVM mock accounts).
+pub struct FromH160;
+
+impl<AccountId: From<sp_core::H160>> sp_runtime::traits::Convert<sp_core::H160, AccountId>
+	for FromH160
+{
+	fn convert(token: sp_core::H160) -> AccountId {
+		AccountId::from(token)
 	}
 }
 
@@ -265,7 +327,7 @@ pub mod pallet {
 	use alloc::vec::Vec;
 
 	use arxon_zk_primitives::{
-		bundle_digest, encrypted_notes_hash,
+		arx20_bundle_digest, bundle_digest, encrypted_notes_hash,
 		mask::{hides_amount, hides_receiver, hides_sender, is_valid_mask},
 		poseidon::cv_dummy_bytes,
 		BundleFields, C1PublicInputs, C2PublicInputs, C3PublicInputs, C4PublicInputs,
@@ -284,11 +346,12 @@ pub mod pallet {
 	use pallet_note_tree::{MerkleTree, TreeId};
 	use pallet_nullifier_registry::NullifierSet;
 	use pallet_zk_verifier::VerifyProof;
-	use sp_runtime::traits::{AccountIdConversion, SaturatedConversion, Zero};
+	use sp_core::H160;
+	use sp_runtime::traits::{AccountIdConversion, Convert, SaturatedConversion, Zero};
 
 	use super::{
-		weights::WeightInfo, ComplianceAttachment, Inputs, Outputs, PrivacyMask, ProofBundle,
-		PtrAttachment, ReceiptSink,
+		weights::WeightInfo, ComplianceAttachment, Inputs, Outputs, PrivacyAsset, PrivacyMask,
+		ProofBundle, PtrAttachment, ReceiptSink,
 	};
 
 	/// Balance type of the configured currency.
@@ -319,6 +382,9 @@ pub mod pallet {
 		type Trees: MerkleTree;
 		/// Receipt attachments (`()` until `pallet-ptr` is rewritten).
 		type Receipts: ReceiptSink;
+		/// Maps an ARX-20 contract to the account that must sign `*_arx20` calls.
+		/// On Arxon this is identity (`AccountId20`); it must match the EVM address mapping.
+		type TokenToAccount: Convert<H160, Self::AccountId>;
 		/// Weights.
 		type WeightInfo: WeightInfo;
 	}
@@ -482,6 +548,10 @@ pub mod pallet {
 		InvalidOutputIndex,
 		/// The compliance attachment's registry root is not a recent membership tree root.
 		UnknownRegistryRoot,
+		/// Only the ARX-20 contract may submit into its own pool.
+		OnlyArx20Token,
+		/// Token address is zero.
+		ZeroTokenAddress,
 	}
 
 	#[pallet::call]
@@ -540,6 +610,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			let depositor = ensure_signed(origin)?;
 			let intent = Intent {
+				asset: PrivacyAsset::Native,
 				anchor: None,
 				inputs: Inputs::default(),
 				outputs,
@@ -569,6 +640,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			ensure_signed(origin)?;
 			let intent = Intent {
+				asset: PrivacyAsset::Native,
 				anchor: Some(anchor),
 				inputs,
 				outputs,
@@ -604,6 +676,105 @@ pub mod pallet {
 		) -> DispatchResult {
 			ensure_signed(origin)?;
 			let intent = Intent {
+				asset: PrivacyAsset::Native,
+				anchor: Some(anchor),
+				inputs,
+				outputs,
+				mask_bits,
+				expiry_block,
+				proofs,
+				ptr,
+				compliance,
+				value: ValueFlow::Transfer,
+			};
+			Self::execute(intent)
+		}
+
+		/// Shields `amount` of ARX-20 `token` into that token's tree. Does not
+		/// move native ARX; the token contract must burn public balance first.
+		/// Signer must be the token account.
+		#[pallet::call_index(7)]
+		#[pallet::weight(T::WeightInfo::shield(outputs.len() as u32))]
+		pub fn shield_arx20(
+			origin: OriginFor<T>,
+			token: H160,
+			amount: BalanceOf<T>,
+			outputs: Outputs,
+			mask_bits: u8,
+			expiry_block: BlockNumberFor<T>,
+			proofs: ProofBundle,
+		) -> DispatchResult {
+			let depositor = Self::ensure_arx20_token(origin, token)?;
+			let intent = Intent {
+				asset: PrivacyAsset::Arx20(token),
+				anchor: None,
+				inputs: Inputs::default(),
+				outputs,
+				mask_bits,
+				expiry_block,
+				proofs,
+				ptr: None,
+				compliance: None,
+				value: ValueFlow::Shield { depositor, amount },
+			};
+			Self::execute(intent)
+		}
+
+		/// Unshields ARX-20 `token` notes. Does not pay native ARX; the token
+		/// contract must mint after this call succeeds.
+		#[pallet::call_index(8)]
+		#[pallet::weight(T::WeightInfo::unshield(inputs.len() as u32, outputs.len() as u32))]
+		pub fn unshield_arx20(
+			origin: OriginFor<T>,
+			token: H160,
+			recipient: T::AccountId,
+			amount: BalanceOf<T>,
+			anchor: FieldBytes,
+			inputs: Inputs,
+			outputs: Outputs,
+			mask_bits: u8,
+			expiry_block: BlockNumberFor<T>,
+			proofs: ProofBundle,
+		) -> DispatchResult {
+			Self::ensure_arx20_token(origin, token)?;
+			let intent = Intent {
+				asset: PrivacyAsset::Arx20(token),
+				anchor: Some(anchor),
+				inputs,
+				outputs,
+				mask_bits,
+				expiry_block,
+				proofs,
+				ptr: None,
+				compliance: None,
+				value: ValueFlow::Unshield { recipient, amount },
+			};
+			Self::execute(intent)
+		}
+
+		/// Private transfer inside one ARX-20 token's pool.
+		#[pallet::call_index(9)]
+		#[pallet::weight(T::WeightInfo::submit_private_transfer(
+			inputs.len() as u32,
+			outputs.len() as u32,
+			ptr.is_some(),
+			compliance.is_some()
+		))]
+		pub fn submit_private_transfer_arx20(
+			origin: OriginFor<T>,
+			token: H160,
+			anchor: FieldBytes,
+			inputs: Inputs,
+			outputs: Outputs,
+			mask_bits: u8,
+			expiry_block: BlockNumberFor<T>,
+			ptr: Option<PtrAttachment>,
+			compliance: Option<ComplianceAttachment>,
+			proofs: ProofBundle,
+		) -> DispatchResult {
+			Self::ensure_arx20_token(origin, token)?;
+			let intent = Intent {
+				asset: PrivacyAsset::Arx20(token),
 				anchor: Some(anchor),
 				inputs,
 				outputs,
@@ -640,6 +811,8 @@ pub mod pallet {
 
 	/// One bundle, whatever extrinsic produced it.
 	pub struct Intent<T: Config> {
+		/// Native ARX or one ARX-20 token.
+		pub asset: super::PrivacyAsset,
 		/// Note tree root the spend proofs open to (`None` when nothing is spent).
 		pub anchor: Option<FieldBytes>,
 		/// Spent notes.
@@ -701,6 +874,20 @@ pub mod pallet {
 		/// Account that registered `pk`.
 		pub fn shielded_key_owner(pk: &FieldBytes) -> Option<T::AccountId> {
 			ShieldedKeyOwners::<T>::get(pk)
+		}
+
+		/// Signer must be the ARX-20 contract `token`.
+		fn ensure_arx20_token(
+			origin: OriginFor<T>,
+			token: H160,
+		) -> Result<T::AccountId, DispatchError> {
+			let who = ensure_signed(origin)?;
+			ensure!(!token.is_zero(), Error::<T>::ZeroTokenAddress);
+			ensure!(
+				who == T::TokenToAccount::convert(token),
+				Error::<T>::OnlyArx20Token
+			);
+			Ok(who)
 		}
 
 		/// Converts a base-unit amount into shielded units.
@@ -803,9 +990,10 @@ pub mod pallet {
 		}
 
 		fn check_notes(intent: &Intent<T>) -> DispatchResult {
+			let tree = intent.asset.tree();
 			if let Some(anchor) = &intent.anchor {
 				ensure!(
-					T::Trees::is_known_root(TreeId::Note, anchor),
+					T::Trees::is_known_root(tree, anchor),
 					Error::<T>::UnknownAnchor
 				);
 			}
@@ -815,9 +1003,10 @@ pub mod pallet {
 					Error::<T>::UnknownRegistryRoot
 				);
 			}
+			let asset = intent.asset.token();
 			for (i, input) in intent.inputs.iter().enumerate() {
 				ensure!(
-					!T::Nullifiers::is_spent(&input.nullifier),
+					!T::Nullifiers::is_spent_for(asset, &input.nullifier),
 					Error::<T>::NullifierAlreadySpent
 				);
 				ensure!(
@@ -831,7 +1020,7 @@ pub mod pallet {
 			}
 			for (i, output) in intent.outputs.iter().enumerate() {
 				ensure!(
-					!T::Trees::contains_leaf(TreeId::Note, &output.cm),
+					!T::Trees::contains_leaf(tree, &output.cm),
 					Error::<T>::DuplicateCommitment
 				);
 				ensure!(
@@ -891,7 +1080,7 @@ pub mod pallet {
 				.iter()
 				.map(|o| o.encrypted_note.as_slice())
 				.collect();
-			bundle_digest(&BundleFields {
+			let fields = BundleFields {
 				chain_id: CHAIN_ID,
 				expiry_block: intent.expiry_block.saturated_into(),
 				recipient: recipient.as_deref(),
@@ -906,7 +1095,11 @@ pub mod pallet {
 				encrypted_notes_hash: encrypted_notes_hash(&notes),
 				receipt: intent.ptr.map(|p| (p.payment_output_index, p.ptr_id)),
 				compliance: intent.compliance.map(|c| (c.output_index, c.registry_root)),
-			})
+			};
+			match intent.asset.token() {
+				None => bundle_digest(&fields),
+				Some(token) => arx20_bundle_digest(&token.0, &fields),
+			}
 		}
 
 		fn instances<L: PublicInputLayout>(
@@ -1031,11 +1224,13 @@ pub mod pallet {
 			Self::check_shape(&intent)?;
 			Self::check_notes(&intent)?;
 			let transparent = Self::transparent(&intent)?;
-			if let ValueFlow::Unshield { amount, .. } = &intent.value {
-				ensure!(
-					Self::pool_balance() >= *amount,
-					Error::<T>::PoolInsufficient
-				);
+			if intent.asset.is_native() {
+				if let ValueFlow::Unshield { amount, .. } = &intent.value {
+					ensure!(
+						Self::pool_balance() >= *amount,
+						Error::<T>::PoolInsufficient
+					);
+				}
 			}
 			let digest = Self::digest_of(&intent, &transparent);
 			ensure!(
@@ -1046,8 +1241,10 @@ pub mod pallet {
 
 			// Writes. FRAME dispatch is transactional, so an error below still rolls back.
 			let mask = PrivacyMask::from_bits(intent.mask_bits);
+			let tree = intent.asset.tree();
+			let asset = intent.asset.token();
 			for input in intent.inputs.iter() {
-				T::Nullifiers::mark_spent(&input.nullifier)?;
+				T::Nullifiers::mark_spent_for(asset, &input.nullifier)?;
 				let revealed_sender =
 					(!hides_sender(intent.mask_bits)).then_some(input.revealed_sender);
 				let sender_account = revealed_sender.and_then(ShieldedKeyOwners::<T>::get);
@@ -1059,7 +1256,7 @@ pub mod pallet {
 				});
 			}
 			for output in intent.outputs.iter() {
-				let leaf_index = T::Trees::insert(TreeId::Note, &output.cm)?;
+				let leaf_index = T::Trees::insert(tree, &output.cm)?;
 				let revealed_receiver =
 					(!hides_receiver(intent.mask_bits)).then_some(output.revealed_receiver);
 				let receiver_account = revealed_receiver.and_then(ShieldedKeyOwners::<T>::get);
@@ -1077,12 +1274,14 @@ pub mod pallet {
 			}
 			match &intent.value {
 				ValueFlow::Shield { depositor, amount } => {
-					T::Currency::transfer(
-						depositor,
-						&Self::pool_account(),
-						*amount,
-						Preservation::Expendable,
-					)?;
+					if intent.asset.is_native() {
+						T::Currency::transfer(
+							depositor,
+							&Self::pool_account(),
+							*amount,
+							Preservation::Expendable,
+						)?;
+					}
 					Self::deposit_event(Event::Shielded {
 						depositor: depositor.clone(),
 						amount: *amount,
@@ -1090,12 +1289,14 @@ pub mod pallet {
 					});
 				}
 				ValueFlow::Unshield { recipient, amount } => {
-					T::Currency::transfer(
-						&Self::pool_account(),
-						recipient,
-						*amount,
-						Preservation::Expendable,
-					)?;
+					if intent.asset.is_native() {
+						T::Currency::transfer(
+							&Self::pool_account(),
+							recipient,
+							*amount,
+							Preservation::Expendable,
+						)?;
+					}
 					Self::deposit_event(Event::Unshielded {
 						recipient: recipient.clone(),
 						amount: *amount,

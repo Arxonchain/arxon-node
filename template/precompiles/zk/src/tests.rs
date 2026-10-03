@@ -16,8 +16,8 @@ use sp_core::{H160, H256, U256};
 
 use crate::{
 	mock::{
-		new_test_ext, precompiles, FakeVerifier, NoteTree, NullifierRegistry, PCall, Privacy,
-		Runtime, RuntimeOrigin, SCall, ZkVerifier, ALICE_BALANCE, UNIT,
+		new_test_ext, precompiles, ACall, FakeVerifier, NoteTree, NullifierRegistry, PCall,
+		Privacy, Runtime, RuntimeOrigin, SCall, ZkVerifier, ALICE_BALANCE, UNIT,
 	},
 	submit::{
 		AbiInput, AbiInputs, AbiOptionalAttachment, AbiOutput, AbiOutputs, AbiProofs,
@@ -819,4 +819,235 @@ fn submit_selectors_match_the_documented_signatures() {
 			"submitPrivateTransfer(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),(bytes,bytes,bytes,bytes,bytes))"
 		)]
 	);
+}
+
+// --- 0x802 ARX-20 --------------------------------------------------------------------------------
+
+fn arx20_address() -> H160 {
+	H160::from_low_u64_be(crate::ARX20_ADDRESS)
+}
+
+fn token() -> H160 {
+	H160::from_low_u64_be(0xA20)
+}
+
+#[test]
+fn arx20_shield_writes_the_token_tree_not_native_arx() {
+	new_test_ext().execute_with(|| {
+		precompiles()
+			.prepare_test(
+				token(),
+				arx20_address(),
+				ACall::shield {
+					amount: U256::from(42 * UNIT),
+					outputs: abi_outputs(vec![abi_output(1, 2)]),
+					mask_bits: 0,
+					expiry_block: U256::from(EXPIRY),
+					proofs: abi_proofs(false, true),
+				},
+			)
+			.execute_returns(());
+
+		assert_eq!(NoteTree::leaf_count(TreeId::Note), 0);
+		assert!(NoteTree::contains_leaf(
+			TreeId::Arx20(token()),
+			&FieldBytes(h(1).0)
+		));
+		assert_eq!(Privacy::pool_balance(), 0);
+	});
+}
+
+#[test]
+fn arx20_get_note_tree_root_is_empty_until_shield() {
+	new_test_ext().execute_with(|| {
+		let empty = NoteTree::current_root(TreeId::Arx20(token()));
+		precompiles()
+			.prepare_test(
+				Alice,
+				arx20_address(),
+				ACall::get_note_tree_root {
+					token: Address(token()),
+				},
+			)
+			.execute_returns(H256(empty.0));
+	});
+}
+
+#[test]
+fn arx20_selectors_match_the_documented_signatures() {
+	assert_eq!(
+		ACall::shield_selectors(),
+		&[compute_selector(
+			"shield(uint256,(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bytes,bytes,bytes,bytes,bytes))"
+		)]
+	);
+	assert_eq!(
+		ACall::unshield_selectors(),
+		&[compute_selector(
+			"unshield(address,uint256,bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bytes,bytes,bytes,bytes,bytes))"
+		)]
+	);
+	assert_eq!(
+		ACall::submit_private_transfer_selectors(),
+		&[compute_selector(
+			"submitPrivateTransfer(bytes32,(bytes32,bytes32,bytes32)[],(bytes32,bytes32,bytes32,bytes32,bytes)[],uint8,uint256,(bool,uint8,bytes32),(bool,uint8,bytes32),(bytes,bytes,bytes,bytes,bytes))"
+		)]
+	);
+	assert_eq!(
+		ACall::get_note_leaf_count_selectors(),
+		&[compute_selector("getNoteLeafCount(address)")]
+	);
+	assert_eq!(
+		ACall::get_note_leaf_selectors(),
+		&[compute_selector("getNoteLeaf(address,uint256)")]
+	);
+	assert_eq!(
+		ACall::get_note_leaves_selectors(),
+		&[compute_selector("getNoteLeaves(address,uint256,uint256)")]
+	);
+}
+
+#[test]
+fn arx20_get_note_leaf_returns_inserted_commitment() {
+	new_test_ext().execute_with(|| {
+		precompiles()
+			.prepare_test(
+				token(),
+				arx20_address(),
+				ACall::shield {
+					amount: U256::from(42 * UNIT),
+					outputs: abi_outputs(vec![abi_output(1, 2)]),
+					mask_bits: 0,
+					expiry_block: U256::from(EXPIRY),
+					proofs: abi_proofs(false, true),
+				},
+			)
+			.execute_returns(());
+
+		precompiles()
+			.prepare_test(
+				Alice,
+				arx20_address(),
+				ACall::get_note_leaf_count {
+					token: Address(token()),
+				},
+			)
+			.execute_returns(U256::from(1u64));
+		precompiles()
+			.prepare_test(
+				Alice,
+				arx20_address(),
+				ACall::get_note_leaf {
+					token: Address(token()),
+					index: U256::zero(),
+				},
+			)
+			.execute_returns(h(1));
+	});
+}
+
+fn insert_token_notes(token: H160, n: u64) -> Vec<H256> {
+	(1..=n)
+		.map(|i| {
+			let leaf = FieldBytes::from_u64(0x3000 + i);
+			assert_ok!(<NoteTree as MerkleTree>::insert(
+				TreeId::Arx20(token),
+				&leaf
+			));
+			H256(leaf.0)
+		})
+		.collect()
+}
+
+fn token_leaves_call(token: H160, start: u64, count: u64) -> ACall {
+	ACall::get_note_leaves {
+		token: Address(token),
+		start: U256::from(start),
+		count: U256::from(count),
+	}
+}
+
+#[test]
+fn arx20_get_note_leaf_costs_one_read_whatever_the_tree_size() {
+	for notes in [1, 64] {
+		new_test_ext().execute_with(|| {
+			let leaves = insert_token_notes(token(), notes);
+
+			precompiles()
+				.prepare_test(
+					Alice,
+					arx20_address(),
+					ACall::get_note_leaf {
+						token: Address(token()),
+						index: U256::zero(),
+					},
+				)
+				.expect_cost(RuntimeHelper::<Runtime>::db_read_gas_cost())
+				.execute_returns(leaves[0]);
+		});
+	}
+}
+
+#[test]
+fn arx20_get_note_leaves_pages_the_token_tree_and_charges_per_leaf() {
+	new_test_ext().execute_with(|| {
+		let leaves = insert_token_notes(token(), 6);
+		let read = RuntimeHelper::<Runtime>::db_read_gas_cost();
+
+		precompiles()
+			.prepare_test(Alice, arx20_address(), token_leaves_call(token(), 2, 3))
+			.expect_cost(read * 4)
+			.execute_returns(leaves[2..5].to_vec());
+		precompiles()
+			.prepare_test(Alice, arx20_address(), token_leaves_call(token(), 6, 100))
+			.execute_returns(Vec::<H256>::new());
+	});
+}
+
+#[test]
+fn arx20_get_note_leaves_never_returns_another_tokens_or_native_leaves() {
+	new_test_ext().execute_with(|| {
+		let mine = insert_token_notes(token(), 2);
+		insert_token_notes(H160::from_low_u64_be(0xB20), 3);
+		assert_ok!(<NoteTree as MerkleTree>::insert(
+			TreeId::Note,
+			&FieldBytes::from_u64(0x9999)
+		));
+
+		precompiles()
+			.prepare_test(Alice, arx20_address(), token_leaves_call(token(), 0, 1024))
+			.execute_returns(mine);
+	});
+}
+
+// --- delegatecall ---------------------------------------------------------------------------------
+
+/// The handle a DELEGATECALL produces: the precompile's code runs in the
+/// delegating contract's context, so `code_address` differs from `context.address`.
+fn handle(code_address: H160, context_address: H160) -> MockHandle {
+	MockHandle::new(
+		code_address,
+		fp_evm::Context {
+			address: context_address,
+			caller: Alice.into(),
+			apparent_value: U256::zero(),
+		},
+	)
+}
+
+#[test]
+fn submission_precompiles_accept_a_direct_call() {
+	for address in [submit_address(), arx20_address()] {
+		assert!(crate::submit::ensure_direct_call(&handle(address, address)).is_ok());
+	}
+}
+
+/// A contract the victim (or a token) calls could otherwise delegatecall the
+/// precompile and shield or spend as that caller.
+#[test]
+fn submission_precompiles_reject_delegatecall() {
+	let attacker_contract = H160::from_low_u64_be(0xbad);
+	for address in [submit_address(), arx20_address()] {
+		assert!(crate::submit::ensure_direct_call(&handle(address, attacker_contract)).is_err());
+	}
 }

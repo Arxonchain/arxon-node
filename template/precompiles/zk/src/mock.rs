@@ -16,7 +16,7 @@ use precompile_utils::{precompile_set::*, testing::*};
 use sp_core::U256;
 use sp_runtime::BuildStorage;
 
-use crate::{ArxonZkPrecompile, ArxonZkSubmitPrecompile};
+use crate::{ArxonArx20Precompile, ArxonZkPrecompile, ArxonZkSubmitPrecompile};
 
 pub type AccountId = MockAccount;
 pub type Balance = u128;
@@ -57,10 +57,12 @@ pub type Precompiles<R> = PrecompileSetBuilder<
 	(
 		PrecompileAt<AddressU64<{ crate::ADDRESS }>, ArxonZkPrecompile<R>>,
 		PrecompileAt<AddressU64<{ crate::SUBMIT_ADDRESS }>, ArxonZkSubmitPrecompile<R>>,
+		PrecompileAt<AddressU64<{ crate::ARX20_ADDRESS }>, ArxonArx20Precompile<R>>,
 	),
 >;
 pub type PCall = crate::ArxonZkPrecompileCall<Runtime>;
 pub type SCall = crate::submit::ArxonZkSubmitPrecompileCall<Runtime>;
+pub type ACall = crate::arx20::ArxonArx20PrecompileCall<Runtime>;
 
 const MAX_POV_SIZE: u64 = 5 * 1024 * 1024;
 
@@ -160,6 +162,7 @@ impl pallet_privacy::Config for Runtime {
 	type Nullifiers = NullifierRegistry;
 	type Trees = NoteTree;
 	type Receipts = ();
+	type TokenToAccount = pallet_privacy::FromH160;
 	type WeightInfo = ();
 }
 

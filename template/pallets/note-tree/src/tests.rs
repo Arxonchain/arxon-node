@@ -27,7 +27,7 @@ fn hex_root(root: FieldBytes) -> String {
 /// Naive oracle: root of `leaves` padded with empty leaves to the tree's depth.
 fn reference_root(tree: TreeId, leaves: &[FieldBytes]) -> FieldBytes {
 	let (hash, depth): (fn(Fp, Fp) -> Fp, usize) = match tree {
-		TreeId::Note => (hash_merkle_note, NOTE_TREE_DEPTH),
+		TreeId::Note | TreeId::Arx20(_) => (hash_merkle_note, NOTE_TREE_DEPTH),
 		TreeId::Membership => (hash_merkle_member, MEMBER_TREE_DEPTH),
 	};
 	let mut empty = Fp::from(0);
@@ -191,6 +191,20 @@ fn the_two_trees_are_independent() {
 			MEMBER_EMPTY_ROOT
 		);
 		assert_ok!(NoteTree::insert(TreeId::Membership, &leaf(1)), 0);
+	});
+}
+
+#[test]
+fn an_arx20_tree_does_not_touch_the_native_note_tree() {
+	new_test_ext().execute_with(|| {
+		let token = TreeId::Arx20(sp_core::H160::from_low_u64_be(0xA20));
+		assert_ok!(NoteTree::insert(token, &leaf(1)));
+
+		assert_eq!(NoteTree::leaf_count(TreeId::Note), 0);
+		assert_eq!(hex_root(NoteTree::root(TreeId::Note)), NOTE_EMPTY_ROOT);
+		assert!(NoteTree::contains_leaf(token, &leaf(1)));
+		assert!(!NoteTree::contains_leaf(TreeId::Note, &leaf(1)));
+		assert_eq!(NoteTree::root(token), reference_root(token, &[leaf(1)]));
 	});
 }
 
@@ -428,5 +442,42 @@ fn migration_indexes_existing_leaves_by_position() {
 		);
 		assert_eq!(NoteTree::leaf_at(TreeId::Membership, 0), Some(leaf(9)));
 		assert_eq!(NoteTree::on_chain_storage_version(), 2);
+	});
+}
+
+// --- ARX-20 trees share the note tree's empty subtrees -----------------------------------------
+
+fn token_tree() -> TreeId {
+	TreeId::Arx20(sp_core::H160::from_low_u64_be(0xA20))
+}
+
+#[test]
+fn an_untouched_token_tree_has_the_note_empty_root_and_reading_it_writes_nothing() {
+	new_test_ext().execute_with(|| {
+		NoteTree::empty_root(TreeId::Note).expect("note zeros");
+
+		assert_eq!(NoteTree::root(token_tree()), NoteTree::root(TreeId::Note));
+		assert!(crate::Zeros::<Test>::iter_prefix(token_tree())
+			.next()
+			.is_none());
+	});
+}
+
+#[test]
+fn the_first_token_insert_builds_no_zeros_of_its_own() {
+	new_test_ext().execute_with(|| {
+		NoteTree::empty_root(TreeId::Note).expect("note zeros");
+
+		assert_ok!(NoteTree::insert(token_tree(), &leaf(1)));
+		assert_ok!(NoteTree::insert(TreeId::Note, &leaf(1)));
+
+		assert!(crate::Zeros::<Test>::iter_prefix(token_tree())
+			.next()
+			.is_none());
+		assert_eq!(
+			NoteTree::root(token_tree()),
+			NoteTree::root(TreeId::Note),
+			"same leaves, same domain: same root"
+		);
 	});
 }

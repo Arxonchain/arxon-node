@@ -37,6 +37,12 @@ pub const SHIELDED_UNIT: u128 = 1_000_000_000;
 /// Domain prefix of the bundle digest.
 pub const BUNDLE_DOMAIN: &[u8] = b"arxon/bundle/v2";
 
+/// Domain prefix of an ARX-20 bundle digest. Native ARX keeps [`BUNDLE_DOMAIN`]
+/// so existing proofs and wallets stay valid. ARX-20 binds the token address
+/// in front of the same field encoding, so a proof cannot be replayed onto
+/// native ARX or another token.
+pub const ARX20_BUNDLE_DOMAIN: &[u8] = b"arxon/arx20-bundle/v1";
+
 /// Pallas base field modulus `p` as 32 little-endian bytes.
 /// `p = 0x40000000000000000000000000000000224698fc094cf91b992d30ed00000001`.
 pub const PALLAS_BASE_MODULUS_LE: [u8; 32] = [

@@ -25,7 +25,7 @@ use hex_literal::hex;
 use pallet_note_tree::{MerkleTree, TreeId};
 use pallet_privacy::{
 	pallet::{Intent, ValueFlow},
-	ComplianceAttachment, Input, Inputs, Output, Outputs, ProofBundle, PtrAttachment,
+	ComplianceAttachment, Input, Inputs, Output, Outputs, PrivacyAsset, ProofBundle, PtrAttachment,
 };
 use rand_core::OsRng;
 use sp_runtime::BuildStorage;
@@ -144,6 +144,7 @@ fn prove_bundle_with(
 	attachments: &Attachments,
 ) -> ProofBundle {
 	let intent = Intent::<Runtime> {
+		asset: PrivacyAsset::Native,
 		anchor,
 		inputs: Inputs::truncate_from(spends.iter().map(input_arg).collect()),
 		outputs: Outputs::truncate_from(outputs.iter().map(output_arg).collect()),

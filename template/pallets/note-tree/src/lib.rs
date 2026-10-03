@@ -8,6 +8,9 @@
 //!   No extrinsic can add a note leaf, so not even root can conjure a note.
 //! * `Membership`: leaves `H_MEMBER(pk)` of regulated counterparties (Circuit 6).
 //!   Root adds leaves with [`Pallet::add_member`].
+//! * `Arx20(token)`: shielded notes of one ARX-20 contract. Same Poseidon domain
+//!   and depth as `Note`, separate storage so native ARX and other tokens cannot
+//!   mix. Created lazily on first insert; not part of genesis.
 //!
 //! The tree is the classic incremental construction (filled subtrees per
 //! level plus precomputed empty-subtree hashes), so an insert costs 32 hashes.
@@ -42,11 +45,12 @@ use arxon_zk_primitives::{
 use frame_support::pallet_prelude::*;
 use scale_codec::{Decode, DecodeWithMemTracking, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
+use sp_core::H160;
 
 /// Most leaves one page read returns (runtime API and `0x800`).
 pub const MAX_LEAF_PAGE: u32 = 1024;
 
-/// Which of the two trees.
+/// Which of the trees. `Note` and `Membership` are genesis; `Arx20` is per token.
 #[derive(
 	Clone,
 	Copy,
@@ -60,22 +64,26 @@ pub const MAX_LEAF_PAGE: u32 = 1024;
 	MaxEncodedLen
 )]
 pub enum TreeId {
-	/// Shielded note commitments.
+	/// Shielded native ARX note commitments.
 	#[codec(index = 0)]
 	Note,
 	/// Trust registry membership leaves.
 	#[codec(index = 1)]
 	Membership,
+	/// Shielded notes of one ARX-20 token. Codec index 2: existing `Note` /
+	/// `Membership` storage keys stay valid.
+	#[codec(index = 2)]
+	Arx20(H160),
 }
 
 impl TreeId {
-	/// Both trees.
+	/// Trees built at genesis. ARX-20 trees are created on first insert.
 	pub const ALL: [TreeId; 2] = [TreeId::Note, TreeId::Membership];
 
 	/// Poseidon domain of this tree's node hash.
 	pub const fn domain(self) -> MerkleDomain {
 		match self {
-			TreeId::Note => MerkleDomain::Note,
+			TreeId::Note | TreeId::Arx20(_) => MerkleDomain::Note,
 			TreeId::Membership => MerkleDomain::Member,
 		}
 	}
@@ -83,7 +91,7 @@ impl TreeId {
 	/// Depth of this tree.
 	pub const fn depth(self) -> u8 {
 		match self {
-			TreeId::Note => NOTE_TREE_DEPTH as u8,
+			TreeId::Note | TreeId::Arx20(_) => NOTE_TREE_DEPTH as u8,
 			TreeId::Membership => MEMBER_TREE_DEPTH as u8,
 		}
 	}
@@ -91,6 +99,17 @@ impl TreeId {
 	/// Maximum number of leaves.
 	pub const fn capacity(self) -> u64 {
 		1u64 << self.depth()
+	}
+
+	/// The tree whose empty subtree chain (`Zeros`) this tree uses. ARX-20
+	/// trees share the note tree's domain and depth, so their empty subtrees are
+	/// identical and come from the chain built at genesis: an untouched token
+	/// tree costs one read for its root, and its first insert builds nothing.
+	pub const fn zeros_tree(self) -> TreeId {
+		match self {
+			TreeId::Arx20(_) => TreeId::Note,
+			tree => tree,
+		}
 	}
 }
 
@@ -261,6 +280,7 @@ pub mod pallet {
 	impl<T: Config> Pallet<T> {
 		/// Empty subtree hash at `height` (`0` = empty leaf), computing and caching the chain on first use.
 		pub fn zero_at(tree: TreeId, height: u8) -> Result<FieldBytes, DispatchError> {
+			let tree = tree.zeros_tree();
 			if let Some(z) = Zeros::<T>::get(tree, height) {
 				return Ok(z);
 			}
@@ -286,7 +306,7 @@ pub mod pallet {
 		/// and is recomputed in memory if they are missing.
 		pub fn root(tree: TreeId) -> FieldBytes {
 			CurrentRoot::<T>::get(tree)
-				.or_else(|| Zeros::<T>::get(tree, tree.depth()))
+				.or_else(|| Zeros::<T>::get(tree.zeros_tree(), tree.depth()))
 				.unwrap_or_else(|| Self::empty_root_in_memory(tree))
 		}
 
@@ -405,7 +425,7 @@ pub mod pallet {
 
 		fn insert_weight(tree: TreeId) -> Weight {
 			match tree {
-				TreeId::Note => T::WeightInfo::insert(),
+				TreeId::Note | TreeId::Arx20(_) => T::WeightInfo::insert(),
 				TreeId::Membership => T::WeightInfo::add_member(),
 			}
 		}

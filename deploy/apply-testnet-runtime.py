@@ -76,24 +76,50 @@ def inspect_seed(uri: str) -> str:
 	)
 	if proc.returncode != 0:
 		raise SystemExit("key inspect failed")
+	seed = ""
+	acct = ""
 	for line in (proc.stdout or "").splitlines():
-		if "secret seed" in line.lower():
+		low = line.lower()
+		if "secret seed" in low:
 			tok = line.strip().split()[-1]
 			if tok.startswith("0x") and len(tok) == 66:
-				return tok
+				seed = tok
+		if "account id" in low:
+			tok = line.strip().split()[-1]
+			if tok.startswith("0x"):
+				acct = tok
+	if acct:
+		print("inspect_account", acct)
+	if seed:
+		return seed, acct
 	if uri.startswith("0x") and len(uri) in (64, 66):
-		return uri if uri.startswith("0x") else "0x" + uri
+		return (uri if uri.startswith("0x") else "0x" + uri), acct
 	raise SystemExit("key inspect did not yield a 32-byte seed")
 
 
-def keypair_of(seed: str) -> Keypair:
+def addr_hex(value: str) -> str:
+	s = "".join(str(value).strip().lower().split())
+	if s.startswith("0x"):
+		s = s[2:]
+	if len(s) > 40:
+		s = s[-40:]
+	return s
+
+
+def keypair_of(seed: str, inspect_acct: str = "") -> Keypair:
 	raw = seed if seed.startswith("0x") else "0x" + seed
 	kp = Keypair.create_from_private_key(raw, crypto_type=KeypairType.ECDSA)
 	addr = kp.ss58_address
 	print("signer", addr)
-	if addr.lower() == ALITH.lower():
+	got = addr_hex(addr)
+	ins = addr_hex(inspect_acct) if inspect_acct else ""
+	want = addr_hex(LIVE_SUDO)
+	print("signer_hex", got)
+	if ins:
+		print("inspect_hex", ins)
+	if got == addr_hex(ALITH) or ins == addr_hex(ALITH):
 		raise SystemExit("refusing Alith; live sudo is %s" % LIVE_SUDO)
-	if addr.lower() != LIVE_SUDO.lower():
+	if want not in (got, ins):
 		raise SystemExit("signer is not live sudo %s" % LIVE_SUDO)
 	return kp
 
@@ -123,7 +149,8 @@ def main() -> int:
 		print("sudo_file", path)
 		uri = uri_from_file(path)
 	print("uri_kind", "hex" if uri.startswith("0x") else "words", "parts", len(uri.split()))
-	kp = keypair_of(inspect_seed(uri))
+	seed, acct = inspect_seed(uri)
+	kp = keypair_of(seed, acct)
 
 	inner = substrate.compose_call(
 		call_module="System",

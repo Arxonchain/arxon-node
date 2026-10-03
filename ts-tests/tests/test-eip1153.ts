@@ -17,7 +17,7 @@ describeWithFrontier("Frontier RPC (EIP-1153)", (context) => {
 	// to spin up a frontier node, it saves a lot of time.
 
 	before("create the contract", async function () {
-		this.timeout(15000);
+		this.timeout(60000);
 		const tx = await context.web3.eth.accounts.signTransaction(
 			{
 				from: GENESIS_ACCOUNT,

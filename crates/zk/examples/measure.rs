@@ -170,7 +170,7 @@ fn main() {
 	if failed {
 		eprintln!(
 			"\na proof exceeded MAX_PROOF_BYTES ({MAX_PROOF_BYTES}), missed its pinned length, \
-			 or a verifying key drifted from VK_HASHES"
+			or a verifying key drifted from VK_HASHES"
 		);
 		std::process::exit(1);
 	}

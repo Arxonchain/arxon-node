@@ -22,6 +22,8 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
 pub use pallet::*;
 pub mod migrations;
 pub mod weights;
@@ -40,6 +42,9 @@ use arxon_zk_primitives::{
 use frame_support::pallet_prelude::*;
 use scale_codec::{Decode, DecodeWithMemTracking, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
+
+/// Most leaves one page read returns (runtime API and `0x800`).
+pub const MAX_LEAF_PAGE: u32 = 1024;
 
 /// Which of the two trees.
 #[derive(
@@ -128,10 +133,11 @@ pub mod pallet {
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
 
-	use super::{weights::WeightInfo, MerkleHasher, MerkleTree, TreeId};
+	use super::{weights::WeightInfo, MerkleHasher, MerkleTree, TreeId, MAX_LEAF_PAGE};
 
 	/// Version 1: the zero-knowledge layout of this pallet (version 0 is the chain before it).
-	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+	/// Version 2: leaves are also indexed by position (`LeafAt`).
+	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(2);
 
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
@@ -186,6 +192,13 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type KnownLeaves<T: Config> =
 		StorageDoubleMap<_, Twox64Concat, TreeId, Blake2_128Concat, FieldBytes, u64, OptionQuery>;
+
+	/// Every inserted leaf by its index, so wallets read a leaf or a page of
+	/// leaves in O(1) per leaf. Indices are assigned by the pallet in order,
+	/// never chosen by a caller, so `Twox64Concat` cannot be ground.
+	#[pallet::storage]
+	pub type LeafAt<T: Config> =
+		StorageDoubleMap<_, Twox64Concat, TreeId, Twox64Concat, u64, FieldBytes, OptionQuery>;
 
 	/// Genesis has nothing to configure; building it precomputes the empty
 	/// subtree chain of both trees so the first insert costs the same as any other.
@@ -298,9 +311,19 @@ pub mod pallet {
 			KnownLeaves::<T>::get(tree, leaf)
 		}
 
-		/// Leaf at `index`, if that slot is filled.
+		/// Leaf at `index`, if that slot is filled. One storage read.
 		pub fn leaf_at(tree: TreeId, index: u64) -> Option<FieldBytes> {
-			KnownLeaves::<T>::iter_prefix(tree).find_map(|(leaf, idx)| (idx == index).then_some(leaf))
+			LeafAt::<T>::get(tree, index)
+		}
+
+		/// Up to `min(count, MAX_LEAF_PAGE)` consecutive leaves starting at
+		/// `start`, stopping at the last inserted leaf. One storage read per leaf.
+		pub fn leaves(tree: TreeId, start: u64, count: u32) -> alloc::vec::Vec<FieldBytes> {
+			let end = Self::leaf_count(tree)
+				.min(start.saturating_add(u64::from(count.min(MAX_LEAF_PAGE))));
+			(start..end)
+				.map_while(|index| LeafAt::<T>::get(tree, index))
+				.collect()
 		}
 
 		/// Appends `leaf`, updates the root and the root history, emits an event.
@@ -332,6 +355,7 @@ pub mod pallet {
 
 			Self::record_root(tree, root)?;
 			KnownLeaves::<T>::insert(tree, leaf, index);
+			LeafAt::<T>::insert(tree, index, leaf);
 			NextLeafIndex::<T>::insert(tree, index + 1);
 			CurrentRoot::<T>::insert(tree, root);
 			Self::deposit_event(Event::LeafInserted {

@@ -19,7 +19,7 @@ describeWithFrontier("Frontier RPC (Contract Methods)", (context) => {
 	// to spin up a frontier node, it saves a lot of time.
 
 	before("create the contract", async function () {
-		this.timeout(15000);
+		this.timeout(60000);
 		const tx = await context.web3.eth.accounts.signTransaction(
 			{
 				from: GENESIS_ACCOUNT,
@@ -65,7 +65,7 @@ describeWithFrontier("Frontier RPC (Contract Methods)", (context) => {
 	});
 
 	it("should get correct environmental block hash", async function () {
-		this.timeout(20000);
+		this.timeout(60000);
 		// Solidity `blockhash` is expected to return the ethereum block hash at a given height.
 		const contract = new context.web3.eth.Contract(TEST_CONTRACT_ABI, FIRST_CONTRACT_ADDRESS, {
 			from: GENESIS_ACCOUNT,

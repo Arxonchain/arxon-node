@@ -7,8 +7,13 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
 sp_api::decl_runtime_apis! {
 	/// Read-only view of the shielded pool.
+	///
+	/// Version 2 adds [`ArxonZkApi::leaves`].
+	#[api_version(2)]
 	pub trait ArxonZkApi {
 		/// Current root of the note commitment tree.
 		fn note_tree_root() -> [u8; 32];
@@ -22,5 +27,10 @@ sp_api::decl_runtime_apis! {
 		fn leaf_count(tree: u8) -> Option<u64>;
 		/// `true` iff proofs of `circuit_id` (wire id 1..=6) are currently accepted.
 		fn circuit_enabled(circuit_id: u8) -> bool;
+		/// Up to `count` leaves of tree `tree` from index `start`, in insertion
+		/// order, capped at 1024 and at the last leaf; `None` for an unknown tree id.
+		/// Wallets sync a tree page by page instead of leaf by leaf.
+		#[api_version(2)]
+		fn leaves(tree: u8, start: u64, count: u32) -> Option<alloc::vec::Vec<[u8; 32]>>;
 	}
 }

@@ -104,6 +104,27 @@ describeWithFrontier("Arxon ZK precompile (0x800)", (context) => {
 		expect(parseInt(verify.result, 16)).to.be.greaterThan(parseInt(getter.result, 16));
 	});
 
+	it("getNoteLeafCount is 0 and getNoteLeaves returns an empty page on an empty tree", async function () {
+		const count = await call(encode("getNoteLeafCount", [], []));
+		const page = await call(
+			encode(
+				"getNoteLeaves",
+				[
+					{ type: "uint256", name: "start" },
+					{ type: "uint256", name: "count" },
+				],
+				[0, 1024]
+			)
+		);
+		expect(context.web3.eth.abi.decodeParameter("uint256", count.result).toString()).to.equal("0");
+		expect(context.web3.eth.abi.decodeParameter("bytes32[]", page.result)).to.eql([]);
+	});
+
+	it("getNoteLeaf reverts on an empty tree", async function () {
+		const result = await call(encode("getNoteLeaf", [{ type: "uint256", name: "index" }], [0]));
+		expect(result.error).to.not.be.undefined;
+	});
+
 	it("state changing calls do not exist: unknown selectors revert", async function () {
 		const result = await call("0xdeadbeef");
 		expect(result.error).to.not.be.undefined;

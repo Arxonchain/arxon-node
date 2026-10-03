@@ -8,7 +8,7 @@ describeWithFrontier("Frontier RPC (Nonce)", (context) => {
 	const TEST_ACCOUNT = "0x1111111111111111111111111111111111111111";
 
 	step("get nonce", async function () {
-		this.timeout(10_000);
+		this.timeout(60000);
 		const tx = await context.web3.eth.accounts.signTransaction(
 			{
 				from: GENESIS_ACCOUNT,

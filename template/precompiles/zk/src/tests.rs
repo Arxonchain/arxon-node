@@ -376,6 +376,10 @@ fn selectors_match_the_documented_signatures() {
 		PCall::get_note_leaf_selectors(),
 		&[compute_selector("getNoteLeaf(uint256)")]
 	);
+	assert_eq!(
+		PCall::get_note_leaves_selectors(),
+		&[compute_selector("getNoteLeaves(uint256,uint256)")]
+	);
 }
 
 #[test]
@@ -404,6 +408,129 @@ fn get_note_leaf_returns_inserted_commitment() {
 				},
 			)
 			.execute_returns(H256(leaf.0));
+	});
+}
+
+fn insert_notes(n: u64) -> Vec<H256> {
+	(1..=n)
+		.map(|i| {
+			let leaf = FieldBytes::from_u64(0x2000 + i);
+			assert_ok!(<NoteTree as MerkleTree>::insert(TreeId::Note, &leaf));
+			H256(leaf.0)
+		})
+		.collect()
+}
+
+fn leaf_call(index: u64) -> PCall {
+	PCall::get_note_leaf {
+		index: U256::from(index),
+	}
+}
+
+fn leaves_call(start: u64, count: u64) -> PCall {
+	PCall::get_note_leaves {
+		start: U256::from(start),
+		count: U256::from(count),
+	}
+}
+
+#[test]
+fn get_note_leaf_reverts_past_the_last_leaf() {
+	new_test_ext().execute_with(|| {
+		insert_notes(2);
+
+		precompiles()
+			.prepare_test(Alice, address(), leaf_call(2))
+			.execute_reverts(|out| out == b"unknown leaf");
+	});
+}
+
+#[test]
+fn get_note_leaf_reverts_for_an_index_above_u64() {
+	new_test_ext().execute_with(|| {
+		precompiles()
+			.prepare_test(Alice, address(), PCall::get_note_leaf { index: U256::MAX })
+			.execute_reverts(|out| out == b"unknown leaf");
+	});
+}
+
+/// The bug this index fixes: reading one leaf scanned the whole tree.
+#[test]
+fn get_note_leaf_costs_one_read_whatever_the_tree_size() {
+	for notes in [1, 64] {
+		new_test_ext().execute_with(|| {
+			let leaves = insert_notes(notes);
+
+			precompiles()
+				.prepare_test(Alice, address(), leaf_call(0))
+				.expect_cost(RuntimeHelper::<Runtime>::db_read_gas_cost())
+				.execute_returns(leaves[0]);
+		});
+	}
+}
+
+/// A page pays one read for the count plus one per leaf returned, never per leaf in the tree.
+#[test]
+fn get_note_leaves_charges_one_read_per_returned_leaf() {
+	new_test_ext().execute_with(|| {
+		let leaves = insert_notes(10);
+		let read = RuntimeHelper::<Runtime>::db_read_gas_cost();
+
+		precompiles()
+			.prepare_test(Alice, address(), leaves_call(4, 3))
+			.expect_cost(read * 4)
+			.execute_returns(leaves[4..7].to_vec());
+		precompiles()
+			.prepare_test(Alice, address(), leaves_call(8, 100))
+			.expect_cost(read * 3)
+			.execute_returns(leaves[8..].to_vec());
+	});
+}
+
+#[test]
+fn get_note_leaves_returns_a_page_in_insertion_order() {
+	new_test_ext().execute_with(|| {
+		let leaves = insert_notes(6);
+
+		precompiles()
+			.prepare_test(Alice, address(), leaves_call(2, 3))
+			.execute_returns(leaves[2..5].to_vec());
+	});
+}
+
+#[test]
+fn get_note_leaves_stops_at_the_last_leaf_and_is_empty_past_it() {
+	new_test_ext().execute_with(|| {
+		let leaves = insert_notes(3);
+
+		precompiles()
+			.prepare_test(Alice, address(), leaves_call(1, 100))
+			.execute_returns(leaves[1..].to_vec());
+		precompiles()
+			.prepare_test(Alice, address(), leaves_call(3, 100))
+			.execute_returns(Vec::<H256>::new());
+		precompiles()
+			.prepare_test(
+				Alice,
+				address(),
+				PCall::get_note_leaves {
+					start: U256::MAX,
+					count: U256::MAX,
+				},
+			)
+			.execute_returns(Vec::<H256>::new());
+	});
+}
+
+#[test]
+fn get_note_leaves_works_in_static_call() {
+	new_test_ext().execute_with(|| {
+		let leaves = insert_notes(2);
+
+		precompiles()
+			.prepare_test(Alice, address(), leaves_call(0, 2))
+			.with_static_call(true)
+			.execute_returns(leaves);
 	});
 }
 

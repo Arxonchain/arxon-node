@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -66,16 +67,58 @@ def hex40() -> str:
 	return h
 
 
+def dump_hexes(text: str, label: str) -> None:
+	print("scan", label, "bytes", len(text))
+	print("has_local", "local_testnet_config" in text)
+	print("has_typo_e62f", OLD in text.lower())
+	print("has_eb62", "eb62fc170437b" in text.lower())
+	print("has_treasury", "2a022a04" in text.lower())
+	print("has_relayer", "f55260f2" in text.lower())
+	print("has_d286", "d286bd6b" in text.lower())
+	print("has_alith", "f24ff3a9" in text.lower())
+
+
+def restore_from_git() -> str:
+	env = os.environ.copy()
+	env["GIT_PAGER"] = "cat"
+	env["PAGER"] = "cat"
+	proc = subprocess.run(
+		["git", "-c", "core.pager=", "show", "origin/feat/arx-20:template/node/src/chain_spec.rs"],
+		cwd="/root/arxon-node",
+		capture_output=True,
+		text=True,
+		timeout=60,
+		env=env,
+	)
+	if proc.returncode != 0:
+		err = (proc.stderr or "").strip()[:400]
+		raise SystemExit("git show spec failed %s" % err)
+	SPEC.parent.mkdir(parents=True, exist_ok=True)
+	SPEC.write_text(proc.stdout)
+	print("restored spec from origin feat/arx-20")
+	return proc.stdout
+
+
 def main() -> int:
 	new = hex40()
-	text = SPEC.read_text()
+	print("new_hex40", new)
+	text = SPEC.read_text() if SPEC.is_file() else ""
+	dump_hexes(text, "before")
 	low = text.lower()
+	if new in low and OLD not in low:
+		print("already patched", new)
+		return 0
+	if OLD not in low:
+		print("old typo missing, restoring template")
+		text = restore_from_git()
+		dump_hexes(text, "restored")
+		low = text.lower()
 	n_old = low.count(OLD)
 	if n_old < 1:
 		if new in low:
 			print("already patched", new)
 			return 0
-		raise SystemExit("old sudo hex not in chain_spec.rs")
+		raise SystemExit("old sudo hex not in spec after restore")
 	if "2a022a04" not in low or "f55260f2" not in low:
 		raise SystemExit("refusing to patch: treasury or relayer missing")
 	chunks = []

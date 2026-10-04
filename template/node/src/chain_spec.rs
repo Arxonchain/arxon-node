@@ -112,7 +112,7 @@ pub fn local_testnet_config() -> ChainSpec {
 		.with_properties(properties())
 		.with_genesis_config_patch(testnet_genesis(
 			// Sudo (public 0x). Secret stays offline.
-			AccountId::from(hex!("1681a02ba0008469f4380f246622eb62fc170437b")),
+			AccountId::from(hex!("1681a02ba0008469f4380f246622e62fc170437b")),
 			vec![
 				(
 					// Treasury / operator pocket (public 0x).
@@ -120,7 +120,7 @@ pub fn local_testnet_config() -> ChainSpec {
 					998_999_999u128 * ARX_UNIT,
 				),
 				(
-					AccountId::from(hex!("1681a02ba0008469f4380f246622eb62fc170437b")),
+					AccountId::from(hex!("1681a02ba0008469f4380f246622e62fc170437b")),
 					1u128 * ARX_UNIT,
 				),
 				(

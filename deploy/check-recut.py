@@ -62,6 +62,17 @@ def main() -> int:
 	for label, h in (("sudo", sudo), ("treasury", KEEP_TREASURY), ("relayer", KEEP_RELAYER)):
 		bal = rpc("eth_getBalance", ["0x" + h, "latest"])
 		print("bal_" + label, bal)
+	try:
+		with urllib.request.urlopen("http://127.0.0.1:8787/relay", timeout=10) as resp:
+			relay = json.loads(resp.read().decode())
+	except Exception as e:
+		print("relay_error", str(e)[:200])
+		return 2
+	payer = str(relay.get("payer") or "").lower()
+	print("relay_ok", relay.get("ok"))
+	print("relay_payer", payer)
+	print("relay_is_f552", payer.startswith("0xf55260f2"))
+	print("relay_is_old_23992", "23992ac0" in payer)
 	return 0
 
 

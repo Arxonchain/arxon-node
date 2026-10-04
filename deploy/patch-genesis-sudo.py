@@ -107,6 +107,9 @@ def main() -> int:
 	low = text.lower()
 	if new in low and OLD not in low:
 		print("already patched", new)
+		print("treasury_ok", "2a022a04" in low)
+		print("relayer_ok", "f55260f2" in low)
+		print("typo_gone", True)
 		return 0
 	if OLD not in low:
 		print("old typo missing, restoring template")
@@ -117,6 +120,11 @@ def main() -> int:
 	if n_old < 1:
 		if new in low:
 			print("already patched", new)
+			print("treasury_ok", "2a022a04" in low)
+			print("relayer_ok", "f55260f2" in low)
+			print("typo_gone", True)
+			if "2a022a04" not in low or "f55260f2" not in low:
+				raise SystemExit("restored spec missing treasury or relayer")
 			return 0
 		raise SystemExit("old sudo hex not in spec after restore")
 	if "2a022a04" not in low or "f55260f2" not in low:

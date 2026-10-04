@@ -7,7 +7,7 @@ use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_consensus_grandpa::AuthorityId as GrandpaId;
 #[allow(unused_imports)]
 use sp_core::ecdsa;
-use sp_core::{Pair, Public, H160, U256};
+use sp_core::{ed25519, sr25519, Pair, Public, H160, U256};
 use sp_runtime::traits::{IdentifyAccount, Verify};
 // Frontier
 use arxon_runtime::{
@@ -43,6 +43,11 @@ where
 /// Generate an Aura authority key.
 pub fn authority_keys_from_seed(s: &str) -> (AuraId, GrandpaId) {
 	(get_from_seed::<AuraId>(s), get_from_seed::<GrandpaId>(s))
+}
+
+/// Public keys only. Secret seeds stay offline and are never in this file.
+fn authority_keys_from_hex(aura: [u8; 32], grandpa: [u8; 32]) -> (AuraId, GrandpaId) {
+	(sr25519::Public::from_raw(aura).into(), ed25519::Public::from_raw(grandpa).into())
 }
 
 fn properties() -> Properties {
@@ -92,48 +97,44 @@ pub fn development_config(enable_manual_seal: bool) -> ChainSpec {
 			// Ethereum chain ID
 			ARXON_EVM_CHAIN_ID,
 			enable_manual_seal,
+			true,
 		))
 		.build()
 }
 
+/// Public testnet (rpc-test.arxon.io). `--dev` / Alice genesis is `development_config`.
+/// Addresses and Aura/Grandpa hex below are **public** on-chain values, not seeds.
 pub fn local_testnet_config() -> ChainSpec {
 	ChainSpec::builder(WASM_BINARY.expect("WASM not available"), Default::default())
-		.with_name("Arxon Local")
-		.with_id("arxon_local")
-		.with_chain_type(ChainType::Local)
+		.with_name("Arxon Testnet")
+		.with_id("arxon_testnet")
+		.with_chain_type(ChainType::Live)
 		.with_properties(properties())
 		.with_genesis_config_patch(testnet_genesis(
-			// DEV ONLY. Well-known Alith test account (public key). Anyone can sudo
-			// a node that uses this genesis. Replace before any public testnet or mainnet.
-			AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
-			// Pre-funded accounts
+			// Sudo (public 0x). Secret stays offline.
+			AccountId::from(hex!("1681a02ba0008469f4380f246622eb62fc170437b")),
 			vec![
 				(
-					AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")),
-					300_000_000u128 * ARX_UNIT,
-				), // Treasury 30%
+					// Treasury / operator pocket (public 0x).
+					AccountId::from(hex!("2a022a04e3d0ea66b8157c9b3c0510db52b8a286")),
+					998_999_999u128 * ARX_UNIT,
+				),
 				(
-					AccountId::from(hex!("3Cd0A705a2DC65e5b1E1205896BaA2be8A07c6e0")),
-					250_000_000u128 * ARX_UNIT,
-				), // Mining Pool 25%
+					AccountId::from(hex!("1681a02ba0008469f4380f246622eb62fc170437b")),
+					1u128 * ARX_UNIT,
+				),
 				(
-					AccountId::from(hex!("798d4Ba9baf0064Ec19eB4F0a1a45785ae9D6DFc")),
-					200_000_000u128 * ARX_UNIT,
-				), // Investors 20%
-				(
-					AccountId::from(hex!("773539d4Ac0e786233D90A233654ccEE26a613D9")),
-					150_000_000u128 * ARX_UNIT,
-				), // Team 15%
-				(
-					AccountId::from(hex!("Ff64d3F6efE2317EE2807d223a0Bdc4c0c49dfDB")),
-					100_000_000u128 * ARX_UNIT,
-				), // Staking 10%
+					// Relayer fee payer (public 0x). Key is RELAYER_KEY on the box.
+					AccountId::from(hex!("f55260f227cb6a1b5a4cafb4dd365a0531b41fa7")),
+					1_000_000u128 * ARX_UNIT,
+				),
 			],
-			vec![
-				authority_keys_from_seed("Alice"),
-				authority_keys_from_seed("Bob"),
-			],
+			vec![authority_keys_from_hex(
+				hex!("68a86a2d5e3f3dc3557172fc5f89a2fa90b74d98b970be759958e61c95035170"),
+				hex!("e6e36daf7c4cdf3aa3259c1ebf70fa59d17727eaff264282066a10562e7ad172"),
+			)],
 			ARXON_EVM_CHAIN_ID,
+			false,
 			false,
 		))
 		.build()
@@ -146,8 +147,11 @@ fn testnet_genesis(
 	initial_authorities: Vec<(AuraId, GrandpaId)>,
 	chain_id: u64,
 	enable_manual_seal: bool,
+	include_dev_evm: bool,
 ) -> serde_json::Value {
-	let evm_accounts = {
+	let evm_accounts = if !include_dev_evm {
+		BTreeMap::new()
+	} else {
 		let mut map = BTreeMap::new();
 		map.insert(
 			// H160 address of Alice dev account
